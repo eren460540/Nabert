@@ -1,0 +1,183 @@
+-- =============================================================================
+-- GROW A GARDEN 2 - AUTO HARVEST ONLY
+-- =============================================================================
+
+_G.AutoHarvest = false
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- DESTROY OLD UI
+if playerGui:FindFirstChild("AutoHarvestUI") then playerGui.AutoHarvestUI:Destroy() end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoHarvestUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- MAIN FRAME - PERFECTLY CENTERED
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 240, 0, 140)
+frame.Position = UDim2.new(0.5, -120, 0.5, -70)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.BackgroundColor3 = Color3.fromRGB(20, 22, 25)
+frame.BackgroundTransparency = 0.05
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = screenGui
+
+-- Border
+local stroke = Instance.new("UIStroke", frame)
+stroke.Color = Color3.fromRGB(52, 211, 100)
+stroke.Thickness = 2
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
+
+-- Title Bar
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.BackgroundColor3 = Color3.fromRGB(35, 38, 42)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = frame
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 12)
+titleCorner.Parent = titleBar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 1, 0)
+title.Position = UDim2.new(0, 15, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "🌾 AUTO HARVEST"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+-- Close Button
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -34, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 13
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = titleBar
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeBtn
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+-- Toggle Button
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 200, 0, 40)
+toggleBtn.Position = UDim2.new(0, 20, 0, 50)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+toggleBtn.Text = "🌾 AUTO HARVEST: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 13
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = frame
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 8)
+btnCorner.Parent = toggleBtn
+
+local function updateButton()
+    if _G.AutoHarvest then
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+        toggleBtn.Text = "🌾 AUTO HARVEST: ON"
+    else
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+        toggleBtn.Text = "🌾 AUTO HARVEST: OFF"
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    _G.AutoHarvest = not _G.AutoHarvest
+    updateButton()
+    print("Auto Harvest:", _G.AutoHarvest and "ON" or "OFF")
+end)
+
+-- Reset Position Button
+local resetBtn = Instance.new("TextButton")
+resetBtn.Size = UDim2.new(0, 200, 0, 28)
+resetBtn.Position = UDim2.new(0, 20, 0, 100)
+resetBtn.BackgroundColor3 = Color3.fromRGB(80, 60, 100)
+resetBtn.Text = "🔄 Reset UI to Center"
+resetBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+resetBtn.TextSize = 11
+resetBtn.Font = Enum.Font.Gotham
+resetBtn.BorderSizePixel = 0
+resetBtn.Parent = frame
+local resetCorner = Instance.new("UICorner")
+resetCorner.CornerRadius = UDim.new(0, 8)
+resetCorner.Parent = resetBtn
+
+resetBtn.MouseButton1Click:Connect(function()
+    frame.Position = UDim2.new(0.5, -120, 0.5, -70)
+    frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    -- Flash effect
+    local orig = frame.BackgroundColor3
+    frame.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+    task.wait(0.15)
+    frame.BackgroundColor3 = orig
+end)
+
+-- =============================================================================
+-- AUTO HARVEST LOGIC
+-- =============================================================================
+local function getRoot()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function teleportTo(cf)
+    local root = getRoot()
+    if root then
+        root.CFrame = cf
+        task.wait(0.2)
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if _G.AutoHarvest then
+            local root = getRoot()
+            if root then
+                for _, v in pairs(workspace:GetDescendants()) do
+                    if v:IsA("ProximityPrompt") then
+                        local action = v.ActionText or ""
+                        -- Only harvest if it says exactly "Harvest"
+                        if action == "Harvest" and v.Parent and v.Parent:IsA("BasePart") then
+                            teleportTo(v.Parent.CFrame * CFrame.new(0, 2, 0))
+                            fireproximityprompt(v)
+                            task.wait(0.1)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+print("")
+print("╔════════════════════════════════════════╗")
+print("║     AUTO HARVEST ONLY - LOADED!        ║")
+print("║                                        ║")
+print("║  UI is at the CENTER of your screen    ║")
+print("║                                        ║")
+print("║  Click the button to toggle ON/OFF     ║")
+ print("╚════════════════════════════════════════╝")
+print("")
