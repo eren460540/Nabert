@@ -1,0 +1,528 @@
+-- =============================================================================
+-- GROW A GARDEN 2 - ULTIMATE FARMER HUB
+-- FEATURES: Auto Harvest, Auto Sell, Auto Buy Seed, Auto Plant, Auto Steal,
+--           Teleport, Anti AFK, Money Editor
+-- UI DESIGN: Based on huHiqGXZ.txt (Extended)
+-- =============================================================================
+
+-- =============================================================================
+-- 1. SETTINGS & GLOBALS (Toggle States - Default OFF)
+-- =============================================================================
+_G.AutoFarm = false          -- Auto Harvest & Auto Sell (combined)
+_G.AutoPlant = false         -- Auto Buy Seed & Plant on empty plots
+_G.AutoSteal = false         -- Steal crops from other players at night
+_G.AntiAFK = false           -- Anti-disconnect
+_G.MoneyEditor = false       -- Money editor mode (separate GUI)
+
+-- Price settings (adjust based on actual game values)
+_G.HargaSeedMythic = 10000
+_G.HargaSeedSuper = 5000
+
+-- Thread management (prevents duplicate loops)
+_G.GAG2_ThreadID = (_G.GAG2_ThreadID or 0) + 1
+local currentThread = _G.GAG2_ThreadID
+
+-- =============================================================================
+-- 2. SERVICES & INIT
+-- =============================================================================
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- =============================================================================
+-- 3. UI CREATION (Based on huHiqGXZ.txt but expanded)
+-- =============================================================================
+if playerGui:FindFirstChild("GAG2_UltimateHub") then
+    playerGui.GAG2_UltimateHub:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "GAG2_UltimateHub"
+ScreenGui.Parent = playerGui
+ScreenGui.ResetOnSpawn = false
+
+-- Main Frame (slightly larger to fit all buttons)
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 260, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -130, 0.4, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 10)
+Corner.Parent = MainFrame
+
+-- Title Bar
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+Title.Text = "GAG2 ULTIMATE FARMER HUB"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 14
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = Title
+
+-- Helper function to create toggle buttons
+local function createToggleButton(name, text, yPos, globalVar)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(0, 220, 0, 35)
+    btn.Position = UDim2.new(0, 20, 0, yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(150, 50, 50) -- Red (OFF)
+    btn.Text = text .. ": OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 12
+    btn.Font = Enum.Font.SourceSansBold
+    btn.Parent = MainFrame
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        _G[globalVar] = not _G[globalVar]
+        if _G[globalVar] then
+            btn.BackgroundColor3 = Color3.fromRGB(50, 150, 50) -- Green (ON)
+            btn.Text = text .. ": ON"
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(150, 50, 50) -- Red (OFF)
+            btn.Text = text .. ": OFF"
+        end
+    end)
+    return btn
+end
+
+-- Create all toggle buttons
+createToggleButton("FarmBtn", "Auto Harvest & Sell", 55, "AutoFarm")
+createToggleButton("PlantBtn", "Auto Buy Seed & Plant", 100, "AutoPlant")
+createToggleButton("StealBtn", "Auto Steal (Night Only)", 145, "AutoSteal")
+createToggleButton("AfkBtn", "Anti AFK Disconnect", 190, "AntiAFK")
+
+-- Money Editor Button (opens separate mini GUI)
+local MoneyEditorBtn = Instance.new("TextButton")
+MoneyEditorBtn.Name = "MoneyEditorBtn"
+MoneyEditorBtn.Size = UDim2.new(0, 220, 0, 35)
+MoneyEditorBtn.Position = UDim2.new(0, 20, 0, 235)
+MoneyEditorBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
+MoneyEditorBtn.Text = "Open Money Editor"
+MoneyEditorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MoneyEditorBtn.TextSize = 12
+MoneyEditorBtn.Font = Enum.Font.SourceSansBold
+MoneyEditorBtn.Parent = MainFrame
+
+local BtnCorner = Instance.new("UICorner")
+BtnCorner.CornerRadius = UDim.new(0, 6)
+BtnCorner.Parent = MoneyEditorBtn
+
+-- Credit Label
+local Credit = Instance.new("TextLabel")
+Credit.Size = UDim2.new(1, 0, 0, 20)
+Credit.Position = UDim2.new(0, 0, 1, -25)
+Credit.BackgroundTransparency = 1
+Credit.Text = "Made By Viral Hub Scripts"
+Credit.TextColor3 = Color3.fromRGB(100, 100, 100)
+Credit.TextSize = 10
+Credit.Font = Enum.Font.SourceSans
+Credit.Parent = MainFrame
+
+-- =============================================================================
+-- 4. MONEY EDITOR GUI (From sheckles generator.txt - redesigned)
+-- =============================================================================
+local function createMoneyEditor()
+    if playerGui:FindFirstChild("ShecklesEditor") then
+        playerGui.ShecklesEditor:Destroy()
+    end
+
+    local editorGui = Instance.new("ScreenGui")
+    editorGui.Name = "ShecklesEditor"
+    editorGui.Parent = playerGui
+    editorGui.ResetOnSpawn = false
+
+    local editorFrame = Instance.new("Frame")
+    editorFrame.Size = UDim2.new(0, 280, 0, 150)
+    editorFrame.Position = UDim2.new(0.5, -140, 0.5, -75)
+    editorFrame.BackgroundColor3 = Color3.fromRGB(22, 26, 28)
+    editorFrame.BorderSizePixel = 0
+    editorFrame.Active = true
+    editorFrame.Draggable = true
+    editorFrame.Parent = editorGui
+
+    local frameCorner = Instance.new("UICorner")
+    frameCorner.CornerRadius = UDim.new(0, 12)
+    frameCorner.Parent = editorFrame
+
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(1, -24, 0, 2)
+    accent.Position = UDim2.new(0, 12, 0, 0)
+    accent.BackgroundColor3 = Color3.fromRGB(52, 211, 100)
+    accent.BorderSizePixel = 0
+    accent.Parent = editorFrame
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 24, 0, 24)
+    closeBtn.Position = UDim2.new(1, -32, 0, 8)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(38, 28, 28)
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.fromRGB(200, 60, 60)
+    closeBtn.TextSize = 12
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Parent = editorFrame
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -70, 0, 20)
+    titleLabel.Position = UDim2.new(0, 40, 0, 12)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "SHECKLES EDITOR"
+    titleLabel.TextColor3 = Color3.fromRGB(240, 245, 242)
+    titleLabel.TextSize = 16
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = editorFrame
+
+    local inputBox = Instance.new("TextBox")
+    inputBox.Size = UDim2.new(1, -24, 0, 40)
+    inputBox.Position = UDim2.new(0, 12, 0, 50)
+    inputBox.PlaceholderText = "Enter amount (e.g., 999999999)"
+    inputBox.PlaceholderColor3 = Color3.fromRGB(110, 130, 115)
+    inputBox.Text = ""
+    inputBox.BackgroundColor3 = Color3.fromRGB(18, 22, 20)
+    inputBox.TextColor3 = Color3.fromRGB(240, 245, 242)
+    inputBox.TextSize = 12
+    inputBox.Font = Enum.Font.Gotham
+    inputBox.BorderSizePixel = 0
+    inputBox.Parent = editorFrame
+    Instance.new("UICorner", inputBox).CornerRadius = UDim.new(0, 7)
+
+    local setBtn = Instance.new("TextButton")
+    setBtn.Size = UDim2.new(1, -24, 0, 36)
+    setBtn.Position = UDim2.new(0, 12, 0, 100)
+    setBtn.BackgroundColor3 = Color3.fromRGB(52, 211, 100)
+    setBtn.Text = "SET SHECKLES"
+    setBtn.TextColor3 = Color3.fromRGB(10, 20, 14)
+    setBtn.TextSize = 12
+    setBtn.Font = Enum.Font.GothamBold
+    setBtn.BorderSizePixel = 0
+    setBtn.Parent = editorFrame
+    Instance.new("UICorner", setBtn).CornerRadius = UDim.new(0, 7)
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -24, 0, 16)
+    statusLabel.Position = UDim2.new(0, 12, 1, -22)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = ""
+    statusLabel.TextColor3 = Color3.fromRGB(110, 130, 115)
+    statusLabel.TextSize = 9
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.Parent = editorFrame
+
+    local function setSheckles(amount)
+        local success = false
+        local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+        if leaderstats then
+            local s = leaderstats:FindFirstChild("Sheckles") or
+                      leaderstats:FindFirstChild("Money") or
+                      leaderstats:FindFirstChild("Cash") or
+                      leaderstats:FindFirstChild("Coins")
+            if s then
+                s.Value = tonumber(amount) or 0
+                success = true
+            end
+        end
+        if not success then
+            for _, v in ipairs(LocalPlayer:GetDescendants()) do
+                if (v:IsA("IntValue") or v:IsA("NumberValue")) and
+                   (string.find(v.Name:lower(), "sheckle") or
+                    string.find(v.Name:lower(), "money") or
+                    string.find(v.Name:lower(), "coin") or
+                    string.find(v.Name:lower(), "cash")) then
+                    v.Value = tonumber(amount) or 0
+                    success = true
+                    break
+                end
+            end
+        end
+        if success then
+            statusLabel.Text = "✓ Set to " .. amount
+            statusLabel.TextColor3 = Color3.fromRGB(52, 211, 100)
+        else
+            statusLabel.Text = "✗ Could not find Sheckles value"
+            statusLabel.TextColor3 = Color3.fromRGB(220, 80, 80)
+        end
+        task.delay(2, function()
+            statusLabel.Text = ""
+        end)
+    end
+
+    setBtn.MouseButton1Click:Connect(function()
+        local amount = inputBox.Text
+        if amount and tonumber(amount) then
+            setSheckles(amount)
+        else
+            statusLabel.Text = "✗ Enter a valid number"
+            statusLabel.TextColor3 = Color3.fromRGB(220, 80, 80)
+            task.delay(2, function()
+                statusLabel.Text = ""
+            end)
+        end
+    end)
+
+    closeBtn.MouseButton1Click:Connect(function()
+        editorGui:Destroy()
+    end)
+end
+
+MoneyEditorBtn.MouseButton1Click:Connect(createMoneyEditor)
+
+-- =============================================================================
+-- 5. HELPER FUNCTIONS
+-- =============================================================================
+local function getPlayerWallet()
+    local stats = LocalPlayer:FindFirstChild("leaderstats")
+    if stats then
+        local moneyObj = stats:FindFirstChild("Coins") or stats:FindFirstChild("Cash") or
+                         stats:FindFirstChild("Money") or stats:FindFirstChild("Sheckles")
+        if moneyObj then return moneyObj.Value end
+    end
+    return 0
+end
+
+local function checkInventoryFull()
+    local stats = LocalPlayer:FindFirstChild("leaderstats")
+    if stats then
+        local current, max
+        for _, child in pairs(stats:GetChildren()) do
+            if child:IsA("IntValue") or child:IsA("NumberValue") then
+                local cName = string.lower(child.Name)
+                if cName == "maxinventory" or cName == "maxbag" or cName == "capacity" then
+                    max = child.Value
+                elseif cName == "inventory" or cName == "bag" or cName == "fruits" then
+                    current = child.Value
+                end
+            end
+        end
+        if current and max and max > 0 and current >= max then
+            return true
+        end
+    end
+    return false
+end
+
+local function getCharacter()
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+end
+
+local function getRootPart()
+    local char = getCharacter()
+    return char:WaitForChild("HumanoidRootPart")
+end
+
+local function teleportTo(cframe)
+    local root = getRootPart()
+    if root then
+        root.CFrame = cframe
+        task.wait(0.3)
+    end
+end
+
+local function isNightTime()
+    return Lighting.ClockTime >= 18 or Lighting.ClockTime <= 6
+end
+
+-- =============================================================================
+-- 6. AUTO HARVEST & SELL LOOP (Based on huHiqGXZ.txt logic)
+-- =============================================================================
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if _G.GAG2_ThreadID ~= currentThread then break end
+
+        if _G.AutoFarm then
+            local root = getRootPart()
+            if root then
+                -- Harvest nearby crops
+                for _, v in pairs(workspace:GetDescendants()) do
+                    if v:IsA("ProximityPrompt") and _G.AutoFarm then
+                        local parentName = string.lower(v.Parent.Name)
+                        if string.find(parentName, "fruit") or string.find(parentName, "harvest") or
+                           v.ObjectText == "Harvest" or v.ActionText == "Harvest" then
+                            teleportTo(v.Parent.CFrame * CFrame.new(0, 2, 0))
+                            task.wait(0.2)
+                            fireproximityprompt(v)
+                            task.wait(0.1)
+                        end
+                    end
+                end
+            end
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+-- Auto Sell (every 15 seconds when inventory is full)
+task.spawn(function()
+    while true do
+        task.wait(15)
+        if _G.GAG2_ThreadID ~= currentThread then break end
+
+        if _G.AutoFarm and checkInventoryFull() then
+            local root = getRootPart()
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "sell") and root then
+                    local lastPos = root.CFrame
+                    teleportTo(obj.CFrame * CFrame.new(0, 3, 0))
+                    task.wait(1.5)
+                    -- Trigger sell prompt
+                    for _, p in pairs(workspace:GetDescendants()) do
+                        if p:IsA("ProximityPrompt") and string.find(string.lower(p.ActionText), "sell") then
+                            fireproximityprompt(p)
+                            break
+                        end
+                    end
+                    task.wait(1)
+                    root.CFrame = lastPos
+                    break
+                end
+            end
+        end
+    end
+end)
+
+-- =============================================================================
+-- 7. AUTO BUY SEED & PLANT LOOP (Based on b2T31RHX.txt)
+-- =============================================================================
+task.spawn(function()
+    local mythicShopPrompt = nil
+    local superShopPrompt = nil
+    local plantPrompts = {}
+
+    while true do
+        task.wait(0.5)
+        if _G.GAG2_ThreadID ~= currentThread then break end
+
+        -- Refresh shop and plant prompts
+        pcall(function()
+            mythicShopPrompt = nil
+            superShopPrompt = nil
+            plantPrompts = {}
+
+            for _, p in pairs(workspace:GetDescendants()) do
+                if p:IsA("ProximityPrompt") then
+                    local act = string.lower(tostring(p.ActionText))
+                    local pName = string.lower(p.Parent.Name)
+
+                    if string.find(act, "plant") or string.find(act, "tanam") or string.find(act, "sow") then
+                        if p.Parent:IsA("BasePart") then
+                            table.insert(plantPrompts, p)
+                        end
+                    elseif string.find(pName, "mythic") and (string.find(act, "buy") or string.find(act, "seed")) then
+                        mythicShopPrompt = p
+                    elseif string.find(pName, "super") and (string.find(act, "buy") or string.find(act, "seed")) then
+                        superShopPrompt = p
+                    end
+                end
+            end
+        end)
+
+        if _G.AutoPlant then
+            local root = getRootPart()
+            local wallet = getPlayerWallet()
+            local targetShop = nil
+
+            -- Determine which seed to buy based on wallet
+            if wallet >= _G.HargaSeedMythic and mythicShopPrompt then
+                targetShop = mythicShopPrompt
+            elseif wallet >= _G.HargaSeedSuper and superShopPrompt then
+                targetShop = superShopPrompt
+            end
+
+            -- Buy seed if possible
+            if targetShop and targetShop.Parent and root then
+                teleportTo(targetShop.Parent.CFrame * CFrame.new(0, 2, 0))
+                task.wait(0.3)
+                fireproximityprompt(targetShop)
+                task.wait(0.3)
+            end
+
+            -- Plant on empty plots
+            if #plantPrompts > 0 and root then
+                local activePlot = plantPrompts[1]
+                if activePlot and activePlot.Parent then
+                    teleportTo(activePlot.Parent.CFrame * CFrame.new(0, 2, 0))
+                    task.wait(0.3)
+                    fireproximityprompt(activePlot)
+                    task.wait(0.1)
+                end
+            end
+        end
+    end
+end)
+
+-- =============================================================================
+-- 8. AUTO STEAL (NIGHT ONLY) - Based on Triscript.txt
+-- =============================================================================
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if _G.GAG2_ThreadID ~= currentThread then break end
+
+        if _G.AutoSteal and isNightTime() then
+            local plots = workspace:FindFirstChild("Plots") or workspace:FindFirstChild("Gardens")
+            if plots then
+                for _, plot in pairs(plots:GetChildren()) do
+                    if plot.Name ~= LocalPlayer.Name and plot.Name ~= "Plot_" .. LocalPlayer.Name then
+                        for _, obj in pairs(plot:GetDescendants()) do
+                            if obj:IsA("ProximityPrompt") and
+                               (string.find(string.lower(obj.Parent.Name), "ready") or
+                                string.find(string.lower(obj.Parent.Name), "crop") or
+                                string.find(string.lower(obj.ActionText), "steal") or
+                                string.find(string.lower(obj.ActionText), "harvest")) then
+                                if obj.Parent:IsA("BasePart") then
+                                    teleportTo(obj.Parent.CFrame * CFrame.new(0, 3, 0))
+                                    task.wait(0.2)
+                                    fireproximityprompt(obj)
+                                    task.wait(0.1)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- =============================================================================
+-- 9. ANTI AFK (Based on huHiqGXZ.txt and b2T31RHX.txt)
+-- =============================================================================
+LocalPlayer.Idled:Connect(function()
+    if _G.AntiAFK then
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(0.5)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+-- =============================================================================
+-- 10. CHARACTER RESPAWN HANDLER
+-- =============================================================================
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    -- Re-initialize any needed references after respawn
+    local root = getRootPart()
+end)
+
+print("✓ GAG2 Ultimate Farmer Hub loaded — Use the GUI to toggle features.")
+print("  Features: Auto Harvest, Auto Sell, Auto Buy Seed, Auto Plant, Auto Steal, Anti AFK, Money Editor")
