@@ -1,0 +1,227 @@
+-- =========================================================
+-- SCRIPT GROW A GARDEN 2 ADVANCED HUB BY GEMINI
+-- =========================================================
+
+-- Tweak Status Fitur (Awalnya Mati)
+_G.AutoFarm = false
+_G.AntiAFK = false
+_G.AutoPet = false
+_G.AutoMythicSeed = false
+_G.AutoSuperSeed = false
+
+-- SETTING HARGA (Silakan ubah angkanya sesuai harga asli di game lu!)
+_G.HargaPetLegendary = 50000
+_G.HargaSeedMythic = 10000
+_G.HargaSeedSuper = 5000
+
+local Players = game:GetService("Players")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    character = char
+    rootPart = char:WaitForChild("HumanoidRootPart")
+end)
+
+-- Fungsi Cek Duit Otomatis di Leaderstats
+local function getDuit()
+    local stats = LocalPlayer:FindFirstChild("leaderstats")
+    if stats then
+        -- Mencari folder duit yang cocok (Coins / Cash / Money)
+        local duitObj = stats:FindFirstChild("Coins") or stats:FindFirstChild("Cash") or stats:FindFirstChild("Money") or stats:FindFirstChild("Duit")
+        if duitObj then return duitObj.Value end
+    end
+    return 0
+end
+
+-- =========================================================
+-- 1. UTILITY INTERFACE GUI (Extended Version)
+-- =========================================================
+
+local TargetGui = game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+if TargetGui:FindFirstChild("GAG2_AdvancedHub") then
+    TargetGui:FindFirstChild("GAG2_AdvancedHub"):Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "GAG2_AdvancedHub"
+ScreenGui.Parent = TargetGui
+ScreenGui.ResetOnSpawn = false
+
+-- Ukuran Frame diperbesar ke Y: 320 biar muat semua tombol
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 240, 0, 320)
+MainFrame.Position = UDim2.new(0.1, 0, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 10)
+Corner.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+Title.Text = "GAG2 ADVANCED HUB"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 14
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = Title
+
+-- Fungsi Helper bikin tombol biar script ga kepanjangan
+local function buatTombol(nama, teks, posisiY)
+    local btn = Instance.new("TextButton")
+    btn.Name = nama
+    btn.Size = UDim2.new(0, 200, 0, 38)
+    btn.Position = UDim2.new(0, 20, 0, posisiY)
+    btn.BackgroundColor3 = Color3.fromRGB(150, 50, 50) -- Default Merah (OFF)
+    btn.Text = teks .. ": OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 12
+    btn.Font = Enum.Font.SourceSansBold
+    btn.Parent = MainFrame
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = btn
+    return btn
+end
+
+-- Create semua tombol menu
+local FarmBtn = buatTombol("FarmBtn", "Auto Farm & Sell", 50)
+local AfkBtn = buatTombol("AfkBtn", "Anti-AFK Disconnect", 100)
+local PetBtn = buatTombol("PetBtn", "Auto Buy Leg Pet", 150)
+local MythicBtn = buatTombol("MythicBtn", "Auto Buy Mythic Seed", 200)
+local SuperBtn = buatTombol("SuperBtn", "Auto Buy Super Seed", 250)
+
+-- =========================================================
+-- 2. LOGIKA & LOOP UTAMA
+-- =========================================================
+
+-- LOOP AUTO FARM (Harvest & Sell)
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if _G.AutoFarm and rootPart then
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") and _G.AutoFarm then
+                    local namaParent = string.lower(v.Parent.Name)
+                    if string.find(namaParent, "fruit") or string.find(namaParent, "harvest") or v.ObjectText == "Harvest" or v.ActionText == "Harvest" then
+                        rootPart.CFrame = v.Parent.CFrame * CFrame.new(0, 2, 0)
+                        task.wait(0.2)
+                        fireproximityprompt(v)
+                        task.wait(0.1)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- TIMED AUTO SELL
+task.spawn(function()
+    while true do
+        if _G.AutoFarm then
+            task.wait(15)
+            for _, obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("Part") or obj:IsA("MeshPart") then
+                    if string.find(string.lower(obj.Name), "sell") and rootPart and _G.AutoFarm then
+                        local lastPos = rootPart.CFrame
+                        rootPart.CFrame = obj.CFrame
+                        task.wait(1.5)
+                        rootPart.CFrame = lastPos
+                        break
+                    end
+                end
+            end
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+-- LOOP AUTO BUY (Pet & Seeds)
+task.spawn(function()
+    while true do
+        task.wait(2) -- Cek berkala tiap 2 detik biar ga spam berlebihan
+        local duitSekarang = getDuit()
+
+        -- A. Logika Auto Buy Legendary Pet
+        if _G.AutoPet and duitSekarang >= _G.HargaPetLegendary then
+            -- Memicu sistem beli (Bisa lewat ProximityPrompt Toko / Pet Egg)
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") and (string.find(string.lower(v.Parent.Name), "legendary") or string.find(string.lower(v.Parent.Name), "egg")) then
+                    fireproximityprompt(v)
+                end
+            end
+            -- OPSI CADANGAN: Nembak Remote Event (Buka Delta Remote Spy buat mastiin nama Remotenya)
+            local buyRemote = game:GetService("ReplicatedStorage"):FindFirstChild("BuyPet", true) or game:GetService("ReplicatedStorage"):FindFirstChild("PurchasePet", true)
+            if buyRemote then buyRemote:FireServer("Legendary") end
+        end
+
+        -- B. Logika Auto Buy Mythic Seed
+        if _G.AutoMythicSeed and duitSekarang >= _G.HargaSeedMythic then
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") and string.find(string.lower(v.Parent.Name), "mythic") then
+                    fireproximityprompt(v)
+                end
+            end
+            local seedRemote = game:GetService("ReplicatedStorage"):FindFirstChild("BuySeed", true) or game:GetService("ReplicatedStorage"):FindFirstChild("PurchaseItem", true)
+            if seedRemote then seedRemote:FireServer("MythicSeed") end
+        end
+
+        -- C. Logika Auto Buy Super Seed
+        if _G.AutoSuperSeed and duitSekarang >= _G.HargaSeedSuper then
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") and string.find(string.lower(v.Parent.Name), "super") then
+                    fireproximityprompt(v)
+                end
+            end
+            local seedRemote = game:GetService("ReplicatedStorage"):FindFirstChild("BuySeed", true) or game:GetService("ReplicatedStorage"):FindFirstChild("PurchaseItem", true)
+            if seedRemote then seedRemote:FireServer("SuperSeed") end
+        end
+    end
+end)
+
+-- ANTI-AFK CONNECTION
+local afkConn
+LocalPlayer.Idled:Connect(function()
+    if _G.AntiAFK then
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(0.5)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+-- =========================================================
+-- 3. KONTROL INTERAKSI TOMBOL (TOGGLE SYSTEM)
+-- =========================================================
+
+local function aturToggle(tombol, variabelGlobal, teksAsli)
+    tombol.MouseButton1Click:Connect(function()
+        _G[variabelGlobal] = not _G[variabelGlobal]
+        if _G[variabelGlobal] then
+            tombol.BackgroundColor3 = Color3.fromRGB(50, 150, 50) -- Hijau (ON)
+            tombol.Text = teksAsli .. ": ON"
+        else
+            tombol.BackgroundColor3 = Color3.fromRGB(150, 50, 50) -- Merah (OFF)
+            tombol.Text = teksAsli .. ": OFF"
+        end
+    end
+end
+
+aturToggle(FarmBtn, "AutoFarm", "Auto Farm & Sell")
+aturToggle(AfkBtn, "AntiAFK", "Anti-AFK Disconnect")
+aturToggle(PetBtn, "AutoPet", "Auto Buy Leg Pet")
+aturToggle(MythicBtn, "AutoMythicSeed", "Auto Buy Mythic Seed")
+aturToggle(SuperBtn, "AutoSuperSeed", "Auto Buy Super Seed")
