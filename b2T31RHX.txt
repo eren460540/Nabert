@@ -1,0 +1,265 @@
+-- =============================================================================
+-- GAME          : Grow a Garden 2
+-- FEATURE       : SEMI-AUTO HARVEST-SELL + FULL AUTO BUY SEEDS & INSTANT PLANT
+-- VERSION       : 6.5 (Specialist Farmer Edition - ZERO MISTAKES)
+-- =============================================================================
+
+_G.AutoHarvest   = true   -- Idupin / Matiin Auto Panen & Teleport Jual
+_G.AutoBuyPlant  = true   -- Idupin / Matiin Auto Beli Benih & Langsung Tanam
+_G.AntiAFK       = true   -- Anti-Disconnect Roblox (Bypass 20 Menit)
+
+-- Thread Lifecycle Management
+_G.GAG2_ThreadID = (_G.GAG2_ThreadID or 0) + 1
+local currentThread = _G.GAG2_ThreadID
+
+local players = game:GetService("Players")
+local localPlayer = players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+local virtualUser = game:GetService("VirtualUser")
+
+-- CONTAINER RADAR CACHE (Biar Delta Ringan & Gak Overload Memory)
+local sellPartCache = nil
+local mythicShopPrompt = nil
+local superShopPrompt = nil
+local harvestPrompts = {}
+local plantPrompts = {}
+
+-- -----------------------------------------------------------------------------
+-- PREMIUM LIGHTWEIGHT UI (PARENT-FIRST - 3 BUTTONS EDITION)
+-- -----------------------------------------------------------------------------
+if playerGui:FindFirstChild("GAG2_SemiUI") then playerGui.GAG2_SemiUI:Destroy() end
+local sgui = Instance.new("ScreenGui", playerGui)
+sgui.Name = "GAG2_SemiUI"
+sgui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", sgui)
+frame.Size = UDim2.new(0, 200, 0, 180) -- Ukuran pas buat 3 tombol
+frame.Position = UDim2.new(0.3, 0, 0.1, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.Active = true
+frame.Draggable = true
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Text = "GAG2 FARMER V6.5"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 12
+Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
+
+local function buatTombolMenu(text, posY, globalVar)
+    local btn = Instance.new("TextButton", frame)
+    btn.Size = UDim2.new(0, 170, 0, 35)
+    btn.Position = UDim2.new(0, 15, 0, posY)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 11
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    local function updateVisual()
+        btn.Text = _G[globalVar] and text .. ": ON" or text .. ": OFF"
+        btn.BackgroundColor3 = _G[globalVar] and Color3.fromRGB(46, 139, 87) or Color3.fromRGB(178, 34, 34)
+    end
+    btn.MouseButton1Click:Connect(function() _G[globalVar] = not _G[globalVar] updateVisual() end)
+    updateVisual()
+end
+
+buatTombolMenu("PANEN & TELE JUAL", 40, "AutoHarvest")
+buatTombolMenu("AUTO BELI & TANAM", 85, "AutoBuyPlant")
+buatTombolMenu("ANTI DISCONNECT AFK", 130, "AntiAFK")
+
+-- -----------------------------------------------------------------------------
+-- BACKGROUND RADAR (Penyelamat Resource HP - Scan Tiap 1.5 Detik)
+-- -----------------------------------------------------------------------------
+task.spawn(function()
+    while true do
+        if _G.GAG2_ThreadID ~= currentThread then break end
+        pcall(function()
+            -- 1. Scan Lapak Jual
+            if not sellPartCache then
+                for _, obj in pairs(workspace:GetDescendants()) do
+                    if obj:IsA("BasePart") and string.find(string.lower(obj.Name), "sell") then 
+                        sellPartCache = obj 
+                        break 
+                    end
+                end
+            end
+            
+            local tempHarvest = {}
+            local tempPlant = {}
+            
+            -- 2. Scan Seluruh Prompt di Map
+            for _, p in pairs(workspace:GetDescendants()) do
+                if p:IsA("ProximityPrompt") then
+                    local act = string.lower(tostring(p.ActionText))
+                    local pName = p.Parent and string.lower(p.Parent.Name) or ""
+                    
+                    -- Filter Prompt Panen Buah
+                    if (string.find(act, "harvest") or string.find(act, "take") or string.find(act, "pick") or string.find(pName, "fruit") or string.find(pName, "crop")) and not string.find(act, "talk") then
+                        if p.Parent:IsA("BasePart") then table.insert(tempHarvest, p) end
+                    
+                    -- Filter Prompt Tanam Tanah Kosong
+                    elseif string.find(act, "plant") or string.find(act, "tanam") or string.find(act, "sow") then
+                        if p.Parent:IsA("BasePart") then table.insert(tempPlant, p) end
+                        
+                    -- Filter Prompt Toko Benih Mythic
+                    elseif string.find(pName, "mythic") and (string.find(act, "buy") or string.find(act, "seed") or string.find(act, "shop")) then
+                        mythicShopPrompt = p
+                        
+                    -- Filter Prompt Toko Benih Super
+                    elseif string.find(pName, "super") and (string.find(act, "buy") or string.find(act, "seed") or string.find(act, "shop")) then
+                        superShopPrompt = p
+                    end
+                end
+            end
+            
+            harvestPrompts = tempHarvest
+            plantPrompts = tempPlant
+        end)
+        task.wait(1.5)
+    end
+end)
+
+-- -----------------------------------------------------------------------------
+-- CORE CORE FUNCTIONS
+-- -----------------------------------------------------------------------------
+local function getPlayerWallet()
+    local stats = localPlayer:FindFirstChild("leaderstats")
+    if stats then
+        local moneyObj = stats:FindFirstChild("Coins") or stats:FindFirstChild("Cash") or stats:FindFirstChild("Money")
+        if moneyObj then return moneyObj.Value end
+    end
+    return 0
+end
+
+local function checkInventoryFull()
+    local isFull = false
+    pcall(function()
+        local stats = localPlayer:FindFirstChild("leaderstats")
+        if stats then
+            local current, max
+            for _, child in pairs(stats:GetChildren()) do
+                if child:IsA("IntValue") or child:IsA("NumberValue") then
+                    local cName = string.lower(child.Name)
+                    if cName == "maxinventory" or cName == "maxbag" or cName == "capacity" or cName == "maxfruits" then max = child.Value
+                    elseif cName == "inventory" or cName == "bag" or cName == "fruits" or cName == "space" then current = child.Value end
+                end
+            end
+            if current and max and max > 0 and current >= max then isFull = true end
+        end
+    end)
+    if isFull then return true end
+    pcall(function()
+        for _, ui in pairs(playerGui:GetDescendants()) do
+            if ui:IsA("TextLabel") and ui.Visible then
+                local t = string.gsub(string.lower(ui.Text), "%s+", "")
+                if string.find(t, "bag") or string.find(t, "inv") or string.find(t, "space") or string.find(t, "fruit") then
+                    local c, m = string.match(t, "(%d+)/(%d+)")
+                    if c and m and tonumber(c) >= tonumber(m) then isFull = true break end
+                end
+            end
+        end
+    end)
+    return isFull
+end
+
+-- -----------------------------------------------------------------------------
+-- MAIN EXECUTION THREAD (HARVEST, BUY, INSTANT PLANT, TELEPORT SELL)
+-- -----------------------------------------------------------------------------
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if _G.GAG2_ThreadID ~= currentThread then break end
+        
+        if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local root = localPlayer.Character.HumanoidRootPart
+            
+            -- KONDISI A: TAS PENUH -> MANDATORI TELEPORT TEMPAT JUAL (SEMI-AUTO SAFE)
+            if _G.AutoHarvest and checkInventoryFull() then
+                if sellPartCache then
+                    local savedPos = root.CFrame
+                    root.CFrame = sellPartCache.CFrame * CFrame.new(0, 3, 0)
+                    task.wait(0.8)
+                    
+                    -- Pemicu dialog NPC Toko
+                    pcall(function()
+                        for _, p in pairs(workspace:GetDescendants()) do
+                            if p:IsA("ProximityPrompt") and (root.Position - p.Parent.Position).Magnitude < 25 then
+                                fireproximityprompt(p)
+                                break
+                            end
+                        end
+                    end)
+                    
+                    -- DIEM DI SINI SAMPAI USER TAP MANUAL DIALOG SELL INVENTORY & TAS KOSONG
+                    while checkInventoryFull() and _G.AutoHarvest and _G.GAG2_ThreadID == currentThread do
+                        task.wait(0.5)
+                    end
+                    
+                    root.CFrame = savedPos
+                    task.wait(0.5)
+                end
+                
+            else
+                -- KONDISI B: TAS MUAT -> PRIORITAS 1: OTOMATIS BELI & TANAM BENIH (JIKA ADA PLOT KOSONG)
+                local acted = false
+                if _G.AutoBuyPlant and #plantPrompts > 0 then
+                    local wallet = getPlayerWallet()
+                    local targetShop = nil
+                    
+                    -- Tentukan beli benih apa berdasarkan isi dompet lu
+                    if wallet >= 10000 and mythicShopPrompt then
+                        targetShop = mythicShopPrompt
+                    elseif wallet >= 5000 and superShopPrompt then
+                        targetShop = superShopPrompt
+                    end
+                    
+                    -- Jika duit cukup, lari beli ke toko dulu
+                    if targetShop and targetShop.Parent then
+                        root.CFrame = targetShop.Parent.CFrame * CFrame.new(0, 2, 0)
+                        task.wait(0.3)
+                        fireproximityprompt(targetShop)
+                        task.wait(0.3)
+                    end
+                    
+                    -- Langsung eksekusi meluncur tanam ke petak tanah kosong pertama
+                    local activePlot = plantPrompts[1]
+                    if activePlot and activePlot.Parent and activePlot.Parent:IsA("BasePart") then
+                        root.CFrame = activePlot.Parent.CFrame * CFrame.new(0, 2, 0)
+                        task.wait(0.3)
+                        fireproximityprompt(activePlot)
+                        task.wait(0.1)
+                        acted = true
+                    end
+                end
+                
+                -- KONDISI C: PRIORITAS 2: AUTO PANEN RAYA (JIKA TIDAK SEDANG MENANAM)
+                if _G.AutoHarvest and not acted then
+                    for _, prompt in pairs(harvestPrompts) do
+                        if not _G.AutoHarvest or checkInventoryFull() or _G.GAG2_ThreadID ~= currentThread or #plantPrompts > 0 then break end
+                        if prompt and prompt.Parent and prompt.Parent:IsA("BasePart") then
+                            root.CFrame = prompt.Parent.CFrame * CFrame.new(0, 2, 0)
+                            task.wait(0.3)
+                            fireproximityprompt(prompt)
+                            task.wait(0.1)
+                        end
+                    end
+                end
+                
+            end
+        end
+    end
+end)
+
+-- Anti-AFK Kick Protector
+pcall(function()
+    localPlayer.Idled:Connect(function()
+        if _G.AntiAFK and _G.GAG2_ThreadID == currentThread then
+            virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            task.wait(0.2)
+            virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        end
+    end)
+end)
