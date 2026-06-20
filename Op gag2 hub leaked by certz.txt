@@ -1,0 +1,2075 @@
+ ██████╗ ██╗███████╗███╗   ███╗
+    ██╔══██╗██║██╔════╝████╗ ████║
+    ██║  ██║██║█████╗  ██╔████╔██║
+    ██║  ██║██║██╔══╝  ██║╚██╔╝██║
+    ██████╔╝██║███████╗██║ ╚═╝ ██║
+    ╚═════╝ ╚═╝╚══════╝╚═╝     ╚═╝
+    Grow A Garden 2 - Full Automation Script
+    Version: 1.0.0
+]]
+
+-- ============================================================
+-- SERVICES
+-- ============================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local PathfindingService = game:GetService("PathfindingService")
+local HttpService = game:GetService("HttpService")
+local TextService = game:GetService("TextService")
+
+-- ============================================================
+-- CORE REFERENCES
+-- ============================================================
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local Networking = require(ReplicatedStorage.SharedModules.Networking)
+local WeatherValues = ReplicatedStorage:WaitForChild("WeatherValues")
+local StockValues = ReplicatedStorage:WaitForChild("StockValues")
+local Gardens = workspace:WaitForChild("Gardens")
+local SeedPackSpawnServerLocations = workspace.Map.SeedPackSpawnServerLocations
+local SeedData = require(ReplicatedStorage.SharedModules.SeedData)
+local SellValueData = require(ReplicatedStorage.SharedModules.SellValueData)
+local FruitValueCalc = require(ReplicatedStorage.SharedModules.FruitValueCalc)
+local MutationData = require(ReplicatedStorage.SharedModules.MutationData)
+
+-- ============================================================
+-- THEME
+-- ============================================================
+local Theme = {
+    Bg          = Color3.fromRGB(10, 10, 13),
+    Sidebar     = Color3.fromRGB(14, 14, 18),
+    Panel       = Color3.fromRGB(18, 18, 23),
+    Section     = Color3.fromRGB(22, 22, 28),
+    Element     = Color3.fromRGB(28, 28, 36),
+    ElementHov  = Color3.fromRGB(34, 34, 44),
+    Accent      = Color3.fromRGB(220, 220, 235),
+    AccentDim   = Color3.fromRGB(140, 140, 160),
+    Text        = Color3.fromRGB(215, 215, 225),
+    TextDim     = Color3.fromRGB(110, 110, 130),
+    Border      = Color3.fromRGB(35, 35, 45),
+    Positive    = Color3.fromRGB(80, 200, 120),
+    Warning     = Color3.fromRGB(255, 180, 60),
+    Danger      = Color3.fromRGB(220, 70, 70),
+    TabActive   = Color3.fromRGB(30, 30, 40),
+    TabInactive = Color3.fromRGB(0, 0, 0, 0),
+}
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local State = {
+    -- Farm
+    AutoHarvest        = false,
+    HarvestMode        = "All",
+    MinRipeness        = 100,
+    MinKg              = 0,
+    WeightMode         = "Above",
+    TPToCollect        = false,
+    HarvestFruits      = {},
+    HarvestMutations   = {},
+
+    AutoSteal          = false,
+    StealNightOnly     = true,
+    StealOwnerAway     = true,
+    StealPlayer        = "Any",
+    StealFruits        = {},
+    StealFilterMode    = "Blacklist",
+    StealMinKg         = 0,
+    StealReturnAfter   = 26,
+
+    AutoPlant          = false,
+    PlantSeeds         = {},
+    PlantPositionMode  = "Auto-fill",
+    PlantFillSpacing   = 1,
+    PlantCircleRadius  = 1,
+    SavedPositions     = {},
+
+    AutoExpand         = false,
+
+    -- Gear
+    AutoWater          = false,
+    WaterPlants        = {},
+    WaterInterval      = 5,
+    WaterDecaying      = false,
+    WaterCan           = "Any",
+
+    AutoSprinkler      = false,
+    SprinklerType      = "Any",
+    SprinklerSpots     = {},
+
+    AutoShovel         = false,
+    ShovelPlants       = {},
+    ShovelRarity       = {},
+    ShovelMutations    = {},
+    ShovelBelowKg      = 0,
+    ShovelKeepMuts     = {},
+
+    -- Weather
+    AutoGoldSeed       = false,
+    AutoRainbowSeed    = false,
+
+    -- Mail
+    AutoMail           = false,
+    AutoClaim          = false,
+
+    -- Shop - Buy
+    AutoBuySeeds       = false,
+    BuySeeds           = {},
+    BuyByRarity        = {},
+    AutoBuyGear        = false,
+    BuyGear            = {},
+    AutoBuyProps       = false,
+    BuyProps           = {},
+
+    -- Shop - Sell
+    AutoSell           = false,
+    SellInterval       = 30,
+
+    -- Pets
+    AutoSnipe          = false,
+    SnipePets          = {},
+    SnipeSizes         = {},
+    SnipeMutations     = {},
+    SnipeServerHop     = false,
+
+    -- Visual
+    FruitESP           = false,
+    HighlightFruits    = true,
+    ESPPlots           = "All",
+    ESPPlants          = {},
+    ESPShow            = {"Value","Weight","Mutations"},
+    ESPTextHeight      = 3,
+    DestroyPlants      = false,
+    RemoveTextures     = false,
+
+    -- Misc
+    AntiAFK            = false,
+    GardenRecovery     = false,
+    RecoveryCheck      = 10,
+    AntiFling          = false,
+    AntiShovel         = false,
+    SkipLoading        = false,
+    AutoSpendSkill     = false,
+
+    -- Internal
+    SeedCollectActive  = false,
+    LastSellTime       = 0,
+    LastBuyTime        = 0,
+    LastWaterTime      = 0,
+    LastShovelTime     = 0,
+    ESPBillboards      = {},
+}
+
+-- ============================================================
+-- UTILITY
+-- ============================================================
+local function GetChar() return LocalPlayer.Character end
+local function GetHRP()
+    local c = GetChar()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function GetHum()
+    local c = GetChar()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function TPTo(pos)
+    local hrp = GetHRP()
+    if hrp then hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0)) end
+end
+
+local function IsNight()
+    local n = ReplicatedStorage:FindFirstChild("Night")
+    return n and n.Value == true
+end
+
+local function IsWeather(name)
+    return WeatherValues:GetAttribute(name.."_Playing") == true
+end
+
+local function GetPlot()
+    local pid = LocalPlayer:GetAttribute("PlotId")
+    if not pid then return nil end
+    return Gardens:FindFirstChild("Plot"..pid)
+end
+
+local function GetAllHarvestPrompts(plot)
+    local prompts = {}
+    if not plot then return prompts end
+    local plants = plot:FindFirstChild("Plants")
+    if not plants then return prompts end
+    for _, plant in ipairs(plants:GetDescendants()) do
+        if plant:IsA("ProximityPrompt") and plant:HasTag("HarvestPrompt") and plant.Enabled then
+            local model = plant.Parent and plant.Parent:FindFirstAncestorWhichIsA("Model")
+            local plantId = model and model:GetAttribute("PlantId")
+            local fruitId = model and model:GetAttribute("FruitId") or ""
+            if plantId then
+                table.insert(prompts, {plantId = plantId, fruitId = fruitId, model = model, prompt = plant})
+            end
+        end
+    end
+    return prompts
+end
+
+local function FormatTime(secs)
+    secs = math.max(0, math.floor(secs))
+    local h = math.floor(secs/3600)
+    local m = math.floor(secs%3600/60)
+    local s = secs%60
+    if h > 0 then return string.format("%dh %dm", h, m)
+    elseif m > 0 then return string.format("%dm %ds", m, s)
+    else return string.format("%ds", s) end
+end
+
+local function Abbreviate(n)
+    if n >= 1e12 then return string.format("%.1fT", n/1e12)
+    elseif n >= 1e9 then return string.format("%.1fB", n/1e9)
+    elseif n >= 1e6 then return string.format("%.1fM", n/1e6)
+    elseif n >= 1e3 then return string.format("%.1fK", n/1e3)
+    else return tostring(math.floor(n)) end
+end
+
+-- ============================================================
+-- AUTOMATION CORE
+-- ============================================================
+
+-- AUTO HARVEST: Instant fire CollectFruit for all harvestable fruits
+local function DoAutoHarvest()
+    if State.SeedCollectActive then return end
+    if not State.AutoHarvest then return end
+    local plot = GetPlot()
+    if not plot then return end
+    local prompts = GetAllHarvestPrompts(plot)
+    for _, data in ipairs(prompts) do
+        if not State.AutoHarvest then break end
+        -- Filter by mutation if set
+        local mutation = data.model and data.model:GetAttribute("Mutation") or ""
+        if #State.HarvestMutations > 0 then
+            local found = false
+            for _, m in ipairs(State.HarvestMutations) do
+                if m == mutation then found = true break end
+            end
+            if not found then continue end
+        end
+        -- Teleport to collect if enabled
+        if State.TPToCollect then
+            local pos = data.model and data.model:GetPivot().Position
+            if pos then TPTo(pos) end
+        end
+        pcall(function()
+            Networking.Garden.CollectFruit:Fire(data.plantId, data.fruitId)
+        end)
+        task.wait(0.05) -- minimal server-safe delay
+    end
+end
+
+-- SEED COLLECT: Highest priority, teleport to each gold/rainbow seed instantly
+local function DoSeedCollect()
+    if not State.AutoGoldSeed and not State.AutoRainbowSeed then return end
+    local hrp = GetHRP()
+    if not hrp then return end
+
+    State.SeedCollectActive = true
+
+    -- Collect from SeedPackSpawnServerLocations
+    for _, part in ipairs(SeedPackSpawnServerLocations:GetChildren()) do
+        if not part.Parent then continue end
+        local isRainbow = part:GetAttribute("RainbowSeed") == true
+        local isGold = part:GetAttribute("GoldSeed") == true
+
+        if (isRainbow and State.AutoRainbowSeed) or (isGold and State.AutoGoldSeed) then
+            -- Teleport directly to the seed
+            TPTo(part.Position)
+            task.wait(0.1)
+            -- Fire click remote
+            local packId = part:GetAttribute("PackId") or part.Name
+            pcall(function()
+                Networking.SeedPack.ClickPack:Fire(packId)
+            end)
+            task.wait(0.1)
+        end
+    end
+
+    State.SeedCollectActive = false
+end
+
+-- AUTO SELL: Fire SellAll instantly, no walking needed
+local function DoAutoSell()
+    if State.SeedCollectActive then return end
+    if not State.AutoSell then return end
+    if os.clock() - State.LastSellTime < State.SellInterval then return end
+    State.LastSellTime = os.clock()
+    pcall(function()
+        local result = Networking.NPCS.SellAll:Fire()
+        -- result.Success, result.SellPrice, result.SoldCount
+    end)
+end
+
+-- AUTO BUY SEEDS: Fire purchase remote instantly for all selected seeds
+local function DoAutoBuy()
+    if State.SeedCollectActive then return end
+    if not State.AutoBuySeeds then return end
+    if os.clock() - State.LastBuyTime < 0.5 then return end
+    State.LastBuyTime = os.clock()
+
+    local seedShop = StockValues:FindFirstChild("SeedShop")
+    local items = seedShop and seedShop:FindFirstChild("Items")
+
+    for _, seedName in ipairs(State.BuySeeds) do
+        -- Check stock
+        local stockVal = items and items:FindFirstChild(seedName)
+        if stockVal and stockVal.Value <= 0 then continue end
+        pcall(function()
+            Networking.SeedShop.PurchaseSeed:Fire(seedName)
+        end)
+        task.wait(0.1)
+    end
+end
+
+-- AUTO STEAL: Teleport to target fruit, fire steal remotes, return home
+local function DoAutoSteal()
+    if State.SeedCollectActive then return end
+    if not State.AutoSteal then return end
+    if State.StealNightOnly and not IsNight() then return end
+
+    local myUserId = LocalPlayer.UserId
+    local myPlot = GetPlot()
+
+    -- Get GardenSyncController data
+    local GSC
+    pcall(function()
+        GSC = require(LocalPlayer.PlayerScripts.Controllers.GardenSyncController)
+    end)
+    if not GSC then return end
+
+    local allGardens = GSC:GetAllGardens()
+
+    -- Score and pick best garden
+    local bestScore = 0
+    local bestUserId = nil
+
+    for userId, gardenData in pairs(allGardens) do
+        if userId == myUserId then continue end
+
+        -- Check owner away
+        if State.StealOwnerAway then
+            local ownerPresent = false
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player.UserId == userId then
+                    local pchar = player.Character
+                    local phrp = pchar and pchar:FindFirstChild("HumanoidRootPart")
+                    if phrp then
+                        local plotId = player:GetAttribute("PlotId")
+                        local plot = plotId and Gardens:FindFirstChild("Plot"..plotId)
+                        if plot then
+                            local plotPos = plot:GetPivot().Position
+                            if (phrp.Position - plotPos).Magnitude < 40 then
+                                ownerPresent = true
+                            end
+                        end
+                    end
+                    break
+                end
+            end
+            if ownerPresent then continue end
+        end
+
+        -- Filter by player selection
+        if State.StealPlayer ~= "Any" then
+            local found = false
+            for _, player in ipairs(Players:GetPlayers()) do
+                if tostring(player.UserId) == State.StealPlayer or player.Name == State.StealPlayer then
+                    if player.UserId == userId then found = true end
+                    break
+                end
+            end
+            if not found then continue end
+        end
+
+        -- Score garden
+        local score = 0
+        for plantId, plantData in pairs(gardenData) do
+            local seedName = plantData.SeedName or plantData.PlantName or ""
+            local base = SellValueData[seedName] or 0
+            if plantData.Fruits then
+                for _, fruitData in pairs(plantData.Fruits) do
+                    local w = fruitData.SizeMultiplier or 1
+                    -- Apply blacklist filter
+                    local blocked = false
+                    if State.StealFilterMode == "Blacklist" and #State.StealFruits > 0 then
+                        for _, fn in ipairs(State.StealFruits) do
+                            if fn == seedName then blocked = true break end
+                        end
+                    elseif State.StealFilterMode == "Whitelist" and #State.StealFruits > 0 then
+                        blocked = true
+                        for _, fn in ipairs(State.StealFruits) do
+                            if fn == seedName then blocked = false break end
+                        end
+                    end
+                    if not blocked then
+                        score = score + base * (w ^ 2.65)
+                    end
+                end
+            end
+        end
+
+        if score > bestScore then
+            bestScore = score
+            bestUserId = userId
+        end
+    end
+
+    if not bestUserId then return end
+
+    -- Find target plot
+    local targetPlotId = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.UserId == bestUserId then
+            targetPlotId = player:GetAttribute("PlotId")
+            break
+        end
+    end
+    if not targetPlotId then return end
+
+    local targetPlot = Gardens:FindFirstChild("Plot"..targetPlotId)
+    if not targetPlot then return end
+
+    local plants = targetPlot:FindFirstChild("Plants")
+    if not plants then return end
+
+    local stolenCount = 0
+
+    -- Find all stealable plants/fruits
+    for _, plantModel in ipairs(plants:GetChildren()) do
+        if stolenCount >= State.StealReturnAfter then break end
+        if not State.AutoSteal then break end
+        if State.StealNightOnly and not IsNight() then break end
+
+        local ownerUserId = tonumber(plantModel:GetAttribute("UserId"))
+        local plantId = plantModel:GetAttribute("PlantId")
+        if not (ownerUserId and plantId) then continue end
+
+        local fruits = plantModel:FindFirstChild("Fruits")
+        if fruits then
+            for _, fruitModel in ipairs(fruits:GetChildren()) do
+                if stolenCount >= State.StealReturnAfter then break end
+                local fruitId = fruitModel:GetAttribute("FruitId") or fruitModel.Name
+                local fruitPos = fruitModel:GetPivot().Position
+
+                -- Check min kg
+                local weight = fruitModel:GetAttribute("SizeMultiplier") or 1
+                if weight < State.StealMinKg then continue end
+
+                -- Teleport to fruit
+                TPTo(fruitPos)
+                task.wait(0.15)
+
+                -- Begin + complete steal
+                pcall(function()
+                    Networking.Steal.BeginSteal:Fire(ownerUserId, plantId, fruitId)
+                end)
+                task.wait(0.3)
+                pcall(function()
+                    Networking.Steal.CompleteSteal:Fire()
+                end)
+                task.wait(0.2)
+                stolenCount = stolenCount + 1
+            end
+        else
+            -- Steal plant directly
+            local plantPos = plantModel:GetPivot().Position
+            TPTo(plantPos)
+            task.wait(0.15)
+            pcall(function()
+                Networking.Steal.BeginSteal:Fire(ownerUserId, plantId, "")
+            end)
+            task.wait(0.3)
+            pcall(function()
+                Networking.Steal.CompleteSteal:Fire()
+            end)
+            task.wait(0.2)
+            stolenCount = stolenCount + 1
+        end
+    end
+
+    -- Return to own garden
+    if myPlot then
+        local spawn = myPlot:FindFirstChild("SpawnPoint")
+        if spawn then TPTo(spawn.Position) end
+    end
+end
+
+-- AUTO WATER: Fire watering remote for all plants
+local function DoAutoWater()
+    if State.SeedCollectActive then return end
+    if not State.AutoWater then return end
+    if os.clock() - State.LastWaterTime < State.WaterInterval then return end
+    State.LastWaterTime = os.clock()
+
+    local plot = GetPlot()
+    if not plot then return end
+    local plants = plot:FindFirstChild("Plants")
+    if not plants then return end
+
+    -- Need watering can tool
+    local char = GetChar()
+    if not char then return end
+    local tool = char:FindFirstChildOfClass("Tool")
+    local canName = tool and tool:GetAttribute("WateringCan")
+    if not canName then
+        -- Check backpack
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t:GetAttribute("WateringCan") then
+                    -- Equip it
+                    char.Humanoid:EquipTool(t)
+                    task.wait(0.1)
+                    canName = t:GetAttribute("WateringCan")
+                    tool = t
+                    break
+                end
+            end
+        end
+    end
+    if not canName then return end
+
+    for _, plantModel in ipairs(plants:GetChildren()) do
+        if not State.AutoWater then break end
+        local seedName = plantModel:GetAttribute("SeedName") or ""
+        -- Filter by plants
+        if #State.WaterPlants > 0 then
+            local found = false
+            for _, pn in ipairs(State.WaterPlants) do
+                if pn == seedName then found = true break end
+            end
+            if not found then continue end
+        end
+        local pos = plantModel:GetPivot().Position
+        pcall(function()
+            Networking.WateringCan.UseWateringCan:Fire(pos, canName, tool)
+        end)
+        task.wait(0.5)
+    end
+end
+
+-- AUTO SHOVEL: Fire shovel remote for selected plants
+local function DoAutoShovel()
+    if State.SeedCollectActive then return end
+    if not State.AutoShovel then return end
+    if os.clock() - State.LastShovelTime < 1 then return end
+    State.LastShovelTime = os.clock()
+
+    local plot = GetPlot()
+    if not plot then return end
+    local plants = plot:FindFirstChild("Plants")
+    if not plants then return end
+
+    local char = GetChar()
+    if not char then return end
+    local tool = char:FindFirstChildOfClass("Tool")
+    local shovelName = tool and tool:GetAttribute("Shovel")
+    if not shovelName then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t:GetAttribute("Shovel") then
+                    char.Humanoid:EquipTool(t)
+                    task.wait(0.1)
+                    shovelName = t:GetAttribute("Shovel")
+                    tool = t
+                    break
+                end
+            end
+        end
+    end
+    if not shovelName then return end
+
+    for _, plantModel in ipairs(plants:GetChildren()) do
+        if not State.AutoShovel then break end
+        local seedName = plantModel:GetAttribute("SeedName") or ""
+        local mutation = plantModel:GetAttribute("Mutation") or ""
+
+        -- Filter
+        if #State.ShovelPlants > 0 then
+            local found = false
+            for _, pn in ipairs(State.ShovelPlants) do
+                if pn == seedName then found = true break end
+            end
+            if not found then continue end
+        end
+
+        -- Keep mutations check
+        if #State.ShovelKeepMuts > 0 and mutation ~= "" then
+            local keep = false
+            for _, m in ipairs(State.ShovelKeepMuts) do
+                if m == mutation then keep = true break end
+            end
+            if keep then continue end
+        end
+
+        local plantId = plantModel:GetAttribute("PlantId") or plantModel.Name
+        pcall(function()
+            Networking.Shovel.UseShovel:Fire(plantId, "", shovelName, tool)
+        end)
+        task.wait(0.5)
+    end
+end
+
+-- AUTO PLANT: Plant seeds at saved positions or auto-fill
+local function DoAutoPlant()
+    if State.SeedCollectActive then return end
+    if not State.AutoPlant then return end
+    if #State.PlantSeeds == 0 then return end
+
+    local char = GetChar()
+    if not char then return end
+
+    for _, seedName in ipairs(State.PlantSeeds) do
+        if not State.AutoPlant then break end
+        -- Find seed tool
+        local tool = nil
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t:GetAttribute("SeedTool") == seedName then
+                    tool = t
+                    break
+                end
+            end
+        end
+        if not tool then continue end
+
+        char.Humanoid:EquipTool(tool)
+        task.wait(0.1)
+
+        if #State.SavedPositions > 0 then
+            for _, pos in ipairs(State.SavedPositions) do
+                if not State.AutoPlant then break end
+                pcall(function()
+                    Networking.Plant.PlantSeed:Fire(pos, seedName, tool)
+                end)
+                task.wait(0.2)
+            end
+        else
+            -- Auto-fill: plant at a grid within own plot
+            local plot = GetPlot()
+            if plot then
+                local plotPos = plot:GetPivot().Position
+                local spacing = State.PlantFillSpacing * 3 + 1
+                for i = -3, 3 do
+                    for j = -3, 3 do
+                        if not State.AutoPlant then break end
+                        local pos = plotPos + Vector3.new(i * spacing, 0, j * spacing)
+                        pcall(function()
+                            Networking.Plant.PlantSeed:Fire(pos, seedName, tool)
+                        end)
+                        task.wait(0.15)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- AUTO CLAIM MAIL: Claim all inbox items
+local function DoAutoClaimMail()
+    if not State.AutoClaim then return end
+    pcall(function()
+        local inbox = Networking.Mailbox.OpenInbox:Fire()
+        if type(inbox) == "table" then
+            for mailId, _ in pairs(inbox) do
+                Networking.Mailbox.Claim:Fire(mailId)
+                task.wait(0.3)
+            end
+        end
+    end)
+end
+
+-- ANTI AFK
+local AntiAFKConn = nil
+local function SetAntiAFK(enabled)
+    if AntiAFKConn then AntiAFKConn:Disconnect() AntiAFKConn = nil end
+    if enabled then
+        AntiAFKConn = RunService.Heartbeat:Connect(function()
+            if math.random(1,1000) == 1 then
+                -- Fire a virtual input to reset AFK timer
+                pcall(function()
+                    LocalPlayer:Move(Vector3.new(0,0,0))
+                end)
+            end
+        end)
+    end
+end
+
+-- ANTI FLING
+local AntiFlingConn = nil
+local function SetAntiFling(enabled)
+    if AntiFlingConn then AntiFlingConn:Disconnect() AntiFlingConn = nil end
+    if enabled then
+        local hrp = GetHRP()
+        if hrp then
+            -- Lock velocity
+            AntiFlingConn = RunService.Heartbeat:Connect(function()
+                local h = GetHRP()
+                if h then
+                    if h.AssemblyLinearVelocity.Magnitude > 100 then
+                        h.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                    end
+                end
+            end)
+        end
+    end
+end
+
+-- ANTI SHOVEL: Detect shovel hits and teleport away
+local function SetAntiShovel(enabled)
+    -- Monitor for incoming shovel damage
+    if enabled then
+        Networking.Shovel.HitPlayer.OnClientEvent:Connect(function()
+            local hrp = GetHRP()
+            if hrp then
+                hrp.CFrame = hrp.CFrame * CFrame.new(0, 20, 0)
+            end
+        end)
+    end
+end
+
+-- FRUIT ESP
+local ESPConnections = {}
+local function UpdateESP()
+    -- Clear old
+    for _, bb in pairs(State.ESPBillboards) do
+        if bb and bb.Parent then bb:Destroy() end
+    end
+    State.ESPBillboards = {}
+
+    if not State.FruitESP then return end
+
+    -- Scan all gardens
+    for _, plot in ipairs(Gardens:GetChildren()) do
+        -- Filter by plot selection
+        if State.ESPPlots ~= "All" then
+            local plotId = tonumber(string.match(plot.Name, "%d+"))
+            if tostring(plotId) ~= State.ESPPlots then continue end
+        end
+
+        local plants = plot:FindFirstChild("Plants")
+        if not plants then continue end
+
+        for _, plantModel in ipairs(plants:GetDescendants()) do
+            if plantModel:IsA("Model") then
+                local fruitName = plantModel:GetAttribute("SeedName") or ""
+                local weight = plantModel:GetAttribute("SizeMultiplier") or 0
+                local mutation = plantModel:GetAttribute("Mutation") or ""
+
+                -- Filter by plants
+                if #State.ESPPlants > 0 then
+                    local found = false
+                    for _, pn in ipairs(State.ESPPlants) do
+                        if pn == fruitName then found = true break end
+                    end
+                    if not found then continue end
+                end
+
+                local primaryPart = plantModel.PrimaryPart or plantModel:FindFirstChildWhichIsA("BasePart")
+                if not primaryPart then continue end
+
+                -- Create billboard
+                local bb = Instance.new("BillboardGui")
+                bb.Name = "DiemESP"
+                bb.Size = UDim2.new(0, 120, 0, 50)
+                bb.StudsOffset = Vector3.new(0, State.ESPTextHeight + 2, 0)
+                bb.AlwaysOnTop = true
+                bb.MaxDistance = 200
+                bb.Adornee = primaryPart
+                bb.Parent = primaryPart
+
+                local lbl = Instance.new("TextLabel")
+                lbl.Size = UDim2.new(1,0,1,0)
+                lbl.BackgroundTransparency = 1
+                lbl.TextColor3 = Color3.fromRGB(255,255,255)
+                lbl.TextStrokeTransparency = 0
+                lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+                lbl.TextScaled = true
+                lbl.Font = Enum.Font.GothamBold
+                lbl.Text = ""
+                lbl.Parent = bb
+
+                local parts = {}
+                if table.find(State.ESPShow, "Value") and SellValueData[fruitName] then
+                    local val = pcall(function()
+                        return FruitValueCalc(fruitName, weight, mutation, LocalPlayer, nil)
+                    end)
+                    table.insert(parts, "💰"..Abbreviate(SellValueData[fruitName] * (weight^2.65)))
+                end
+                if table.find(State.ESPShow, "Weight") and weight > 0 then
+                    table.insert(parts, string.format("%.2fkg", weight))
+                end
+                if table.find(State.ESPShow, "Mutations") and mutation ~= "" then
+                    table.insert(parts, mutation)
+                end
+                if fruitName ~= "" then table.insert(parts, 1, fruitName) end
+                lbl.Text = table.concat(parts, "\n")
+
+                -- Highlight
+                if State.HighlightFruits then
+                    local hl = Instance.new("Highlight")
+                    hl.FillColor = Color3.fromRGB(255, 200, 50)
+                    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                    hl.FillTransparency = 0.5
+                    hl.OutlineTransparency = 0.3
+                    hl.Adornee = plantModel
+                    hl.Parent = plantModel
+                end
+
+                table.insert(State.ESPBillboards, bb)
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- MAIN LOOP
+-- ============================================================
+local function MainLoop()
+    while true do
+        -- HIGHEST PRIORITY: Seed collection
+        if State.AutoGoldSeed or State.AutoRainbowSeed then
+            local goldMoon = workspace:GetAttribute("ActiveWeather") == "Goldmoon"
+            local rainbowMoon = workspace:GetAttribute("ActiveWeather") == "Rainbow Moon"
+            local rainbowWeather = IsWeather("Rainbow")
+
+            if goldMoon or rainbowMoon or rainbowWeather then
+                task.spawn(DoSeedCollect)
+            end
+        end
+
+        -- Auto Harvest
+        if State.AutoHarvest then
+            task.spawn(DoAutoHarvest)
+        end
+
+        -- Auto Sell
+        if State.AutoSell then
+            task.spawn(DoAutoSell)
+        end
+
+        -- Auto Buy
+        if State.AutoBuySeeds then
+            task.spawn(DoAutoBuy)
+        end
+
+        -- Auto Steal
+        if State.AutoSteal then
+            task.spawn(DoAutoSteal)
+        end
+
+        -- Auto Water
+        if State.AutoWater then
+            task.spawn(DoAutoWater)
+        end
+
+        -- Auto Shovel
+        if State.AutoShovel then
+            task.spawn(DoAutoShovel)
+        end
+
+        -- Auto Plant
+        if State.AutoPlant then
+            task.spawn(DoAutoPlant)
+        end
+
+        -- Auto Claim Mail
+        if State.AutoClaim then
+            task.spawn(DoAutoClaimMail)
+            task.wait(30)
+        end
+
+        -- ESP update (every 5s)
+        if State.FruitESP then
+            task.spawn(UpdateESP)
+        end
+
+        task.wait(0.5)
+    end
+end
+
+-- ============================================================
+-- UI SYSTEM
+-- ============================================================
+
+-- Destroy existing GUI if any
+if PlayerGui:FindFirstChild("DiemUI") then
+    PlayerGui.DiemUI:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DiemUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 999
+ScreenGui.Parent = PlayerGui
+
+-- Main Window
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 780, 0, 540)
+MainFrame.Position = UDim2.new(0.5,-390,0.5,-270)
+MainFrame.BackgroundColor3 = Theme.Bg
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ScreenGui
+
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0,10)
+local ms = Instance.new("UIStroke", MainFrame)
+ms.Color = Theme.Border
+ms.Thickness = 1
+
+-- ============================================================
+-- UI HELPERS
+-- ============================================================
+local function MakeFrame(parent, size, pos, color, name)
+    local f = Instance.new("Frame")
+    f.Size = size or UDim2.new(1,0,1,0)
+    f.Position = pos or UDim2.new(0,0,0,0)
+    f.BackgroundColor3 = color or Theme.Panel
+    f.BorderSizePixel = 0
+    if name then f.Name = name end
+    f.Parent = parent
+    return f
+end
+
+local function MakeLabel(parent, text, size, pos, color, fontSize, font, xAlign)
+    local l = Instance.new("TextLabel")
+    l.Size = size or UDim2.new(1,0,1,0)
+    l.Position = pos or UDim2.new(0,0,0,0)
+    l.BackgroundTransparency = 1
+    l.Text = text or ""
+    l.TextColor3 = color or Theme.Text
+    l.TextSize = fontSize or 13
+    l.Font = font or Enum.Font.Gotham
+    l.TextXAlignment = xAlign or Enum.TextXAlignment.Left
+    l.TextYAlignment = Enum.TextYAlignment.Center
+    l.TextWrapped = true
+    l.Parent = parent
+    return l
+end
+
+local function MakeButton(parent, text, size, pos, bgColor, textColor, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = size or UDim2.new(1,0,0,32)
+    btn.Position = pos or UDim2.new(0,0,0,0)
+    btn.BackgroundColor3 = bgColor or Theme.Element
+    btn.BorderSizePixel = 0
+    btn.Text = text or ""
+    btn.TextColor3 = textColor or Theme.Text
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
+    if callback then
+        btn.MouseButton1Click:Connect(callback)
+    end
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = Theme.ElementHov}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = bgColor or Theme.Element}):Play()
+    end)
+    return btn
+end
+
+local function MakeToggle(parent, labelText, stateKey, order, callback)
+    local row = MakeFrame(parent, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = order or 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+
+    local lbl = MakeLabel(row, labelText, UDim2.new(1,-60,1,0), UDim2.new(0,10,0,0))
+    lbl.TextSize = 12
+
+    local bgFrame = MakeFrame(row, UDim2.new(0,42,0,24), UDim2.new(1,-52,0.5,-12), Color3.fromRGB(40,40,52))
+    bgFrame.ZIndex = 3
+    Instance.new("UICorner", bgFrame).CornerRadius = UDim.new(1,0)
+
+    local knob = MakeFrame(bgFrame, UDim2.new(0,18,0,18), UDim2.new(0,3,0.5,-9), Color3.fromRGB(120,120,140))
+    knob.ZIndex = 4
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
+
+    local function UpdateToggleVisual()
+        local on = State[stateKey]
+        TweenService:Create(bgFrame, TweenInfo.new(0.15), {
+            BackgroundColor3 = on and Theme.Accent or Color3.fromRGB(40,40,52)
+        }):Play()
+        TweenService:Create(knob, TweenInfo.new(0.15), {
+            Position = on and UDim2.new(1,-21,0.5,-9) or UDim2.new(0,3,0.5,-9),
+            BackgroundColor3 = on and Theme.Bg or Color3.fromRGB(120,120,140)
+        }):Play()
+    end
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,1,0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    btn.ZIndex = 5
+    btn.Parent = bgFrame
+    btn.MouseButton1Click:Connect(function()
+        State[stateKey] = not State[stateKey]
+        UpdateToggleVisual()
+        if callback then callback(State[stateKey]) end
+    end)
+
+    UpdateToggleVisual()
+    return row
+end
+
+local function MakeSlider(parent, labelText, stateKey, minVal, maxVal, order, suffix, callback)
+    local row = MakeFrame(parent, UDim2.new(1,-16,0,44), nil, Theme.Element)
+    row.LayoutOrder = order or 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+
+    local lbl = MakeLabel(row, labelText, UDim2.new(0.5,0,0,20), UDim2.new(0,10,0,0))
+    lbl.TextSize = 11
+
+    local valLbl = MakeLabel(row, tostring(State[stateKey])..(suffix or ""), UDim2.new(0.4,0,0,20), UDim2.new(0.6,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+    valLbl.Position = UDim2.new(1,-60,0,2)
+
+    local trackBg = MakeFrame(row, UDim2.new(1,-20,0,4), UDim2.new(0,10,1,-10), Color3.fromRGB(35,35,45))
+    trackBg.ZIndex = 2
+    Instance.new("UICorner", trackBg).CornerRadius = UDim.new(1,0)
+
+    local pct = math.clamp((State[stateKey] - minVal)/(maxVal - minVal), 0, 1)
+    local fill = MakeFrame(trackBg, UDim2.new(pct,0,1,0), nil, Theme.Accent)
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1,0)
+
+    local dragging = false
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(1,0,1,0)
+    sliderBtn.BackgroundTransparency = 1
+    sliderBtn.Text = ""
+    sliderBtn.ZIndex = 3
+    sliderBtn.Parent = trackBg
+
+    local function UpdateSlider(inputX)
+        local rel = math.clamp(inputX - trackBg.AbsolutePosition.X, 0, trackBg.AbsoluteSize.X)
+        local p = rel / trackBg.AbsoluteSize.X
+        local val = math.floor(minVal + (maxVal-minVal)*p)
+        State[stateKey] = val
+        fill.Size = UDim2.new(p,0,1,0)
+        valLbl.Text = tostring(val)..(suffix or "")
+        if callback then callback(val) end
+    end
+
+    sliderBtn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            UpdateSlider(i.Position.X)
+        end
+    end)
+
+    return row
+end
+
+local function MakeSectionHeader(parent, text, order)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,-16,0,22)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(90,90,110)
+    lbl.TextSize = 10
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.LayoutOrder = order or 0
+    lbl.Parent = parent
+    return lbl
+end
+
+local function MakeScrollList(parent)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1,0,1,0)
+    scroll.BackgroundTransparency = 1
+    scroll.ScrollBarThickness = 3
+    scroll.ScrollBarImageColor3 = Theme.AccentDim
+    scroll.CanvasSize = UDim2.new(0,0,0,0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.Parent = parent
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0,4)
+    layout.Parent = scroll
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0,8)
+    pad.PaddingRight = UDim.new(0,8)
+    pad.PaddingTop = UDim.new(0,6)
+    pad.Parent = scroll
+
+    return scroll
+end
+
+local function MakeComingSoon(parent, feature)
+    local f = MakeFrame(parent, UDim2.new(1,0,0,60), nil, Theme.Element)
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0,8)
+    MakeLabel(f, "⏳ "..feature.." — Coming Soon", UDim2.new(1,0,1,0), nil, Theme.AccentDim, 13, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+    return f
+end
+
+-- ============================================================
+-- LAYOUT: Title Bar
+-- ============================================================
+local TitleBar = MakeFrame(MainFrame, UDim2.new(1,0,0,46), UDim2.new(0,0,0,0), Theme.Sidebar, "TitleBar")
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0,10)
+-- fix bottom corners
+local tbFix = MakeFrame(TitleBar, UDim2.new(1,0,0.5,0), UDim2.new(0,0,0.5,0), Theme.Sidebar)
+
+-- Brand
+local brandLbl = MakeLabel(TitleBar, "Diem", UDim2.new(0,80,1,0), UDim2.new(0,16,0,0), Theme.Text, 18, Enum.Font.GothamBold)
+local subLbl = MakeLabel(TitleBar, "Grow a Garden 2", UDim2.new(0,140,0,16), UDim2.new(0,16,1,-20), Theme.TextDim, 11)
+
+-- Close/Min
+local CloseBtn = MakeButton(TitleBar, "×", UDim2.new(0,28,0,28), UDim2.new(1,-36,0.5,-14), Color3.fromRGB(50,50,60), Theme.AccentDim, function()
+    ScreenGui:Destroy()
+end)
+local MinBtn = MakeButton(TitleBar, "−", UDim2.new(0,28,0,28), UDim2.new(1,-70,0.5,-14), Color3.fromRGB(50,50,60), Theme.AccentDim)
+
+-- ============================================================
+-- LAYOUT: Sidebar
+-- ============================================================
+local Sidebar = MakeFrame(MainFrame, UDim2.new(0,145,1,-46), UDim2.new(0,0,0,46), Theme.Sidebar, "Sidebar")
+
+local SidebarLayout = Instance.new("UIListLayout")
+SidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SidebarLayout.Padding = UDim.new(0,2)
+SidebarLayout.Parent = Sidebar
+
+local SidebarPad = Instance.new("UIPadding")
+SidebarPad.PaddingTop = UDim.new(0,10)
+SidebarPad.PaddingLeft = UDim.new(0,8)
+SidebarPad.PaddingRight = UDim.new(0,8)
+SidebarPad.Parent = Sidebar
+
+-- Status bar
+local StatusBar = MakeFrame(MainFrame, UDim2.new(1,0,0,26), UDim2.new(0,0,1,-26), Color3.fromRGB(8,8,10), "StatusBar")
+local StatusLbl = MakeLabel(StatusBar, "● Diem v1.0.0", UDim2.new(0.5,0,1,0), UDim2.new(0,8,0,0), Color3.fromRGB(70,180,100), 10)
+local WeatherLbl = MakeLabel(StatusBar, "Weather: None", UDim2.new(0.5,0,1,0), UDim2.new(0.5,-8,0,0), Theme.TextDim, 10, nil, Enum.TextXAlignment.Right)
+
+-- ============================================================
+-- LAYOUT: Right Panel
+-- ============================================================
+local RightPanel = MakeFrame(MainFrame, UDim2.new(1,-145,1,-72), UDim2.new(0,145,0,46), Theme.Panel, "RightPanel")
+
+-- ============================================================
+-- PAGE SYSTEM
+-- ============================================================
+local Pages = {}
+local CurrentPage = nil
+local SidebarBtns = {}
+
+local function ShowPage(name)
+    for pname, page in pairs(Pages) do
+        page.Visible = pname == name
+    end
+    CurrentPage = name
+    for bname, bdata in pairs(SidebarBtns) do
+        local isActive = bname == name
+        TweenService:Create(bdata.btn, TweenInfo.new(0.12), {
+            BackgroundColor3 = isActive and Theme.TabActive or Theme.Sidebar,
+            BackgroundTransparency = isActive and 0 or 1
+        }):Play()
+        bdata.lbl.TextColor3 = isActive and Theme.Text or Theme.TextDim
+        if bdata.bar then bdata.bar.Visible = isActive end
+    end
+end
+
+local function CreateSidebarBtn(name, icon, order)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,0,38)
+    btn.BackgroundColor3 = Theme.TabActive
+    btn.BackgroundTransparency = 1
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.LayoutOrder = order
+    btn.AutoButtonColor = false
+    btn.Parent = Sidebar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
+
+    -- Active bar
+    local bar = MakeFrame(btn, UDim2.new(0,3,0.6,0), UDim2.new(0,-2,0.2,0), Theme.Accent)
+    bar.Visible = false
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
+
+    local lbl = MakeLabel(btn, icon.."  "..name, UDim2.new(1,0,1,0), UDim2.new(0,8,0,0), Theme.TextDim, 12, Enum.Font.Gotham)
+
+    SidebarBtns[name] = {btn=btn, lbl=lbl, bar=bar}
+    btn.MouseButton1Click:Connect(function() ShowPage(name) end)
+    return btn
+end
+
+local function CreatePage(name)
+    local page = MakeFrame(RightPanel, UDim2.new(1,0,1,0), nil, Theme.Panel)
+    page.Visible = false
+    page.Name = name.."Page"
+    Pages[name] = page
+    return page
+end
+
+-- Sub-tab system
+local function CreateTabBar(parent, tabs)
+    local bar = MakeFrame(parent, UDim2.new(1,0,0,36), nil, Color3.fromRGB(14,14,18))
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Horizontal
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0,2)
+    layout.Parent = bar
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0,8)
+    pad.PaddingTop = UDim.new(0,6)
+    pad.Parent = bar
+
+    local content = MakeFrame(parent, UDim2.new(1,0,1,-36), UDim2.new(0,0,0,36), Theme.Panel)
+
+    local subPages = {}
+    local subBtns = {}
+    local currentSub = nil
+
+    local function ShowSub(name)
+        for k, v in pairs(subPages) do v.Visible = k == name end
+        currentSub = name
+        for k, v in pairs(subBtns) do
+            v.BackgroundTransparency = k == name and 0 or 1
+            v.BackgroundColor3 = k == name and Theme.Element or Theme.Panel
+            v.TextColor3 = k == name and Theme.Text or Theme.TextDim
+        end
+    end
+
+    for i, tab in ipairs(tabs) do
+        local tbtn = Instance.new("TextButton")
+        tbtn.Size = UDim2.new(0, 70, 0, 26)
+        tbtn.BackgroundColor3 = Theme.Element
+        tbtn.BackgroundTransparency = 1
+        tbtn.BorderSizePixel = 0
+        tbtn.Text = tab
+        tbtn.TextColor3 = Theme.TextDim
+        tbtn.TextSize = 12
+        tbtn.Font = Enum.Font.GothamBold
+        tbtn.LayoutOrder = i
+        tbtn.AutoButtonColor = false
+        tbtn.Parent = bar
+        Instance.new("UICorner", tbtn).CornerRadius = UDim.new(0,6)
+
+        local sp = MakeFrame(content, UDim2.new(1,0,1,0), nil, Theme.Panel)
+        sp.Visible = false
+        sp.Name = tab.."Sub"
+        subPages[tab] = sp
+        subBtns[tab] = tbtn
+
+        local spScroll = MakeScrollList(sp)
+        subPages[tab.."Scroll"] = spScroll
+
+        tbtn.MouseButton1Click:Connect(function() ShowSub(tab) end)
+    end
+
+    ShowSub(tabs[1])
+
+    return content, subPages, function(name) ShowSub(name) end
+end
+
+-- ============================================================
+-- CREATE SIDEBAR BUTTONS
+-- ============================================================
+CreateSidebarBtn("Farm", "🌿", 1)
+CreateSidebarBtn("Shop", "🛒", 2)
+CreateSidebarBtn("Fruit Shovel", "⚙", 3)
+CreateSidebarBtn("Pets", "🐾", 4)
+CreateSidebarBtn("Visual", "👁", 5)
+CreateSidebarBtn("Webhook", "📡", 6)
+CreateSidebarBtn("Misc", "⚡", 7)
+CreateSidebarBtn("Settings", "⚙", 8)
+
+-- ============================================================
+-- PAGE: FARM
+-- ============================================================
+local FarmPage = CreatePage("Farm")
+local _, farmSubs, showFarmSub = CreateTabBar(FarmPage, {"Farm", "Gear", "Weather", "Mail"})
+
+-- FARM > Farm sub
+local farmScroll = farmSubs["FarmScroll"]
+
+MakeSectionHeader(farmScroll, "AUTO HARVEST", 1)
+MakeToggle(farmScroll, "Auto Harvest", "AutoHarvest", 2)
+
+-- Harvest Mode dropdown (simplified)
+do
+    local row = MakeFrame(farmScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 3
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Harvest Mode", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    local modes = {"All","Single","Multi"}
+    local idx = 1
+    local modeLbl = MakeLabel(row, modes[idx], UDim2.new(0.4,0,1,0), UDim2.new(0.6,-10,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+    local cycleBtn = Instance.new("TextButton")
+    cycleBtn.Size = UDim2.new(0.4,0,1,0)
+    cycleBtn.Position = UDim2.new(0.6,-10,0,0)
+    cycleBtn.BackgroundTransparency = 1
+    cycleBtn.Text = ""
+    cycleBtn.Parent = row
+    cycleBtn.MouseButton1Click:Connect(function()
+        idx = (idx % #modes) + 1
+        State.HarvestMode = modes[idx]
+        modeLbl.Text = modes[idx]
+    end)
+end
+
+MakeSlider(farmScroll, "Min Ripeness", "MinRipeness", 0, 100, 4, "%")
+MakeSlider(farmScroll, "Min Kg (0=off)", "MinKg", 0, 50, 5, "kg")
+MakeToggle(farmScroll, "TP to Collect", "TPToCollect", 6)
+
+MakeSectionHeader(farmScroll, "AUTO STEAL", 10)
+MakeToggle(farmScroll, "Auto Steal (Night)", "AutoSteal", 11)
+MakeToggle(farmScroll, "Only When Owner Away", "StealOwnerAway", 12)
+MakeSlider(farmScroll, "Min Kg", "StealMinKg", 0, 50, 13, "kg")
+MakeSlider(farmScroll, "Return After", "StealReturnAfter", 1, 100, 14, " fruits")
+
+-- Player selector
+do
+    local row = MakeFrame(farmScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 15
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Select Player", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    local playerLbl = MakeLabel(row, "Any", UDim2.new(0.4,0,1,0), UDim2.new(0.6,-10,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+
+    local refreshBtn = MakeButton(farmScroll, "Refresh Players", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+        -- Repopulate player list on next click
+        playerLbl.Text = "Any"
+        State.StealPlayer = "Any"
+    end)
+    refreshBtn.LayoutOrder = 16
+end
+
+MakeSectionHeader(farmScroll, "AUTO PLANT", 20)
+MakeToggle(farmScroll, "Auto Plant", "AutoPlant", 21)
+MakeSlider(farmScroll, "Fill Spacing", "PlantFillSpacing", 1, 10, 22, " studs")
+MakeSlider(farmScroll, "Circle Radius", "PlantCircleRadius", 1, 20, 23, " studs")
+
+do
+    local posLbl
+    local addBtn = MakeButton(farmScroll, "Add Current Position", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+        local hrp = GetHRP()
+        if hrp then
+            table.insert(State.SavedPositions, hrp.Position)
+            if posLbl then posLbl.Text = "Saved Positions: "..#State.SavedPositions end
+        end
+    end)
+    addBtn.LayoutOrder = 24
+    posLbl = MakeLabel(farmScroll, "Saved Positions: 0", UDim2.new(1,-16,0,22), nil, Theme.TextDim, 11)
+    posLbl.LayoutOrder = 25
+    local clearBtn = MakeButton(farmScroll, "Clear Positions", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+        State.SavedPositions = {}
+        if posLbl then posLbl.Text = "Saved Positions: 0" end
+    end)
+    clearBtn.LayoutOrder = 26
+end
+
+MakeSectionHeader(farmScroll, "OTHER", 30)
+MakeToggle(farmScroll, "Auto Expand Garden", "AutoExpand", 31)
+
+-- FARM > Gear sub
+local gearScroll = farmSubs["GearScroll"]
+
+MakeSectionHeader(gearScroll, "AUTO WATERING CAN", 1)
+MakeToggle(gearScroll, "Auto Watering Can", "AutoWater", 2)
+MakeSlider(gearScroll, "Interval", "WaterInterval", 1, 60, 3, "s")
+MakeToggle(gearScroll, "Auto Water Decaying", "WaterDecaying", 4)
+
+do
+    local row = MakeFrame(gearScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 5
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Watering Can", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    local cans = {"Any","Common Watering Can","Super Watering Can"}
+    local cidx = 1
+    local canLbl = MakeLabel(row, cans[cidx], UDim2.new(0.5,0,1,0), UDim2.new(0.5,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+    local cb = Instance.new("TextButton")
+    cb.Size = UDim2.new(0.5,0,1,0); cb.Position = UDim2.new(0.5,0,0,0)
+    cb.BackgroundTransparency = 1; cb.Text = ""; cb.Parent = row
+    cb.MouseButton1Click:Connect(function()
+        cidx = (cidx % #cans)+1
+        State.WaterCan = cans[cidx]
+        canLbl.Text = cans[cidx]
+    end)
+end
+
+MakeSectionHeader(gearScroll, "AUTO SPRINKLER", 10)
+MakeToggle(gearScroll, "Auto Sprinkler", "AutoSprinkler", 11)
+
+local spotLbl
+do
+    local addSpot = MakeButton(gearScroll, "Add Current Spot", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+        local hrp = GetHRP()
+        if hrp then
+            table.insert(State.SprinklerSpots, hrp.Position)
+            if spotLbl then spotLbl.Text = "Spots: "..#State.SprinklerSpots end
+        end
+    end)
+    addSpot.LayoutOrder = 12
+    spotLbl = MakeLabel(gearScroll, "Spots: 0", UDim2.new(1,-16,0,22), nil, Theme.TextDim, 11)
+    spotLbl.LayoutOrder = 13
+    local clearSpots = MakeButton(gearScroll, "Clear Spots", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+        State.SprinklerSpots = {}
+        if spotLbl then spotLbl.Text = "Spots: 0" end
+    end)
+    clearSpots.LayoutOrder = 14
+end
+
+MakeSectionHeader(gearScroll, "AUTO SHOVEL", 20)
+MakeToggle(gearScroll, "Auto Shovel Plants", "AutoShovel", 21)
+MakeSlider(gearScroll, "Shovel Below", "ShovelBelowKg", 0, 50, 22, "kg")
+
+-- Keep mutations dropdown
+do
+    local row = MakeFrame(gearScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 23
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Keep Mutations", UDim2.new(0.6,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    local muts = {"Any","Gold","Rainbow","Electric","Frozen","Bloodlit","Chained","Starstruck"}
+    local midx = 1
+    local mLbl = MakeLabel(row, muts[midx], UDim2.new(0.35,0,1,0), UDim2.new(0.65,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+    local mb = Instance.new("TextButton")
+    mb.Size = UDim2.new(0.35,0,1,0); mb.Position = UDim2.new(0.65,0,0,0)
+    mb.BackgroundTransparency = 1; mb.Text = ""; mb.Parent = row
+    mb.MouseButton1Click:Connect(function()
+        midx = (midx % #muts)+1
+        local m = muts[midx]
+        mLbl.Text = m
+        if m == "Any" then
+            State.ShovelKeepMuts = {}
+        else
+            State.ShovelKeepMuts = {m}
+        end
+    end)
+end
+
+MakeButton(gearScroll, "Refresh Plants", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+    -- Just a visual refresh trigger
+end).LayoutOrder = 24
+
+-- FARM > Weather sub
+local weatherScroll = farmSubs["WeatherScroll"]
+
+MakeSectionHeader(weatherScroll, "SEED PACKS", 1)
+MakeToggle(weatherScroll, "Auto Collect Gold Seed 🌕", "AutoGoldSeed", 2)
+MakeToggle(weatherScroll, "Auto Collect Rainbow Seed 🌈", "AutoRainbowSeed", 3)
+
+MakeSectionHeader(weatherScroll, "WEATHER PREDICTOR", 10)
+local predLbl = MakeLabel(weatherScroll, "Loading...", UDim2.new(1,-16,0,120), nil, Theme.TextDim, 11)
+predLbl.LayoutOrder = 11
+predLbl.TextWrapped = true
+predLbl.TextYAlignment = Enum.TextYAlignment.Top
+
+-- Weather predictor update
+local TimeCycleData = {
+    Day = {Lasts=450, StartOrder=1},
+    Sunset = {Lasts=30, StartOrder=2},
+    Night = {Lasts=120, StartOrder=3,
+        Weathers = {
+            Moon={Chance=79}, Bloodmoon={Chance=2},
+            Goldmoon={Chance=13}, ["Rainbow Moon"]={Chance=6}
+        }
+    }
+}
+local totalCycle = 450+30+120 -- 600s
+
+local function UpdateWeatherPredictor()
+    local now = os.time()
+    local cyclePos = now % totalCycle
+    local phases = {
+        {name="Day", start=0, dur=450},
+        {name="Sunset", start=450, dur=30},
+        {name="Night", start=480, dur=120},
+    }
+    local currentPhase = "Day"
+    local timeInPhase = cyclePos
+    local timeLeftInPhase = 0
+
+    for _, p in ipairs(phases) do
+        if cyclePos >= p.start and cyclePos < p.start + p.dur then
+            currentPhase = p.name
+            timeInPhase = cyclePos - p.start
+            timeLeftInPhase = p.dur - timeInPhase
+            break
+        end
+    end
+
+    -- Active weather
+    local activeWeather = workspace:GetAttribute("ActiveWeather") or workspace:GetAttribute("ActivePhase") or "?"
+    local activePhase = workspace:GetAttribute("ActivePhase") or "?"
+
+    -- Build predictor text
+    local lines = {}
+    table.insert(lines, "Upcoming:")
+    table.insert(lines, "  "..activePhase.." (now)")
+
+    local offset = timeLeftInPhase
+    for i, p in ipairs(phases) do
+        if p.name ~= currentPhase then
+            table.insert(lines, "  "..p.name.." in "..FormatTime(offset))
+            offset = offset + p.dur
+        end
+    end
+
+    -- Moon times
+    table.insert(lines, "")
+    table.insert(lines, "Next moons:")
+    local nightOffset = 0
+    for _, p in ipairs(phases) do
+        if p.name == "Night" then
+            if cyclePos < p.start then
+                nightOffset = p.start - cyclePos
+            else
+                nightOffset = totalCycle - cyclePos + p.start
+            end
+            break
+        end
+    end
+    table.insert(lines, "  Goldmoon in ~"..FormatTime(nightOffset).." (13% chance)")
+    table.insert(lines, "  Rainbow Moon in ~"..FormatTime(nightOffset).." (6% chance)")
+    table.insert(lines, "  Bloodmoon in ~"..FormatTime(nightOffset).." (2% chance)")
+
+    -- Active weather from WeatherValues
+    local activeWeathers = {}
+    local weatherNames = {"Rain","Lightning","Rainbow","Snowfall","Starfall"}
+    for _, wn in ipairs(weatherNames) do
+        if IsWeather(wn) then
+            local endTime = WeatherValues:GetAttribute(wn.."_EndTime") or 0
+            local remaining = math.max(0, endTime - DateTime.now().UnixTimestamp)
+            table.insert(activeWeathers, wn.." ("..FormatTime(remaining).." left)")
+        end
+    end
+    if #activeWeathers > 0 then
+        table.insert(lines, "")
+        table.insert(lines, "Active: "..table.concat(activeWeathers, ", "))
+    end
+
+    if predLbl then
+        predLbl.Text = table.concat(lines, "\n")
+    end
+end
+
+-- FARM > Mail sub
+local mailScroll = farmSubs["MailScroll"]
+
+MakeSectionHeader(mailScroll, "AUTO MAIL", 1)
+MakeToggle(mailScroll, "Auto Mail", "AutoMail", 2)
+MakeSectionHeader(mailScroll, "CLAIM MAIL", 10)
+MakeToggle(mailScroll, "Auto Claim All Mails", "AutoClaim", 11)
+local claimBtn = MakeButton(mailScroll, "Claim Now", UDim2.new(1,-16,0,34), nil, Theme.Section, nil, function()
+    task.spawn(DoAutoClaimMail)
+end)
+claimBtn.LayoutOrder = 12
+
+-- ============================================================
+-- PAGE: SHOP
+-- ============================================================
+local ShopPage = CreatePage("Shop")
+local _, shopSubs, showShopSub = CreateTabBar(ShopPage, {"Buy", "Sell"})
+
+-- SHOP > Buy
+local buyScroll = shopSubs["BuyScroll"]
+
+MakeSectionHeader(buyScroll, "SEEDS", 1)
+MakeToggle(buyScroll, "Auto Buy Seeds", "AutoBuySeeds", 2)
+
+-- Restock info
+local restockLbl = MakeLabel(buyScroll, "Next Restock: --", UDim2.new(1,-16,0,20), nil, Theme.TextDim, 10)
+restockLbl.LayoutOrder = 3
+
+-- Seed checkboxes
+MakeSectionHeader(buyScroll, "SELECT SEEDS", 4)
+local allSeeds = {
+    "Carrot","Strawberry","Blueberry","Tulip","Tomato","Apple",
+    "Bamboo","Corn","Cactus","Pineapple","Mushroom","Green Bean",
+    "Banana","Grape","Coconut","Mango","Dragon Fruit","Acorn",
+    "Cherry","Sunflower","Venus Fly Trap","Pomegranate","Poison Apple",
+    "Moon Bloom","Dragon's Breath","Ghost Pepper","Poison Ivy"
+}
+
+local seedOrder = 5
+for _, seedName in ipairs(allSeeds) do
+    local row = MakeFrame(buyScroll, UDim2.new(1,-16,0,32), nil, Theme.Element)
+    row.LayoutOrder = seedOrder
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,5)
+
+    local sLbl = MakeLabel(row, seedName, UDim2.new(1,-60,1,0), UDim2.new(0,10,0,0), nil, 11)
+
+    -- Stock display
+    local seedShop = StockValues:FindFirstChild("SeedShop")
+    local items = seedShop and seedShop:FindFirstChild("Items")
+    local stockVal = items and items:FindFirstChild(seedName)
+    local stockNum = stockVal and stockVal.Value or 0
+    local stockLbl = MakeLabel(row, "x"..stockNum, UDim2.new(0,40,1,0), UDim2.new(1,-90,0,0), Theme.TextDim, 10, nil, Enum.TextXAlignment.Right)
+
+    local checked = false
+    local cb = MakeFrame(row, UDim2.new(0,22,0,22), UDim2.new(1,-32,0.5,-11), Color3.fromRGB(35,35,45))
+    Instance.new("UICorner", cb).CornerRadius = UDim.new(0,4)
+    local checkMark = MakeLabel(cb, "", UDim2.new(1,0,1,0), nil, Theme.Accent, 14, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+    local cbBtn = Instance.new("TextButton")
+    cbBtn.Size = UDim2.new(1,0,1,0); cbBtn.BackgroundTransparency = 1; cbBtn.Text = ""; cbBtn.Parent = cb
+    cbBtn.MouseButton1Click:Connect(function()
+        checked = not checked
+        checkMark.Text = checked and "✓" or ""
+        cb.BackgroundColor3 = checked and Color3.fromRGB(30,40,60) or Color3.fromRGB(35,35,45)
+        if checked then table.insert(State.BuySeeds, seedName)
+        else
+            local idx = table.find(State.BuySeeds, seedName)
+            if idx then table.remove(State.BuySeeds, idx) end
+        end
+    end)
+
+    -- Update stock display
+    if stockVal then
+        stockVal.Changed:Connect(function(v)
+            if stockLbl then stockLbl.Text = "x"..v end
+        end)
+    end
+
+    seedOrder = seedOrder + 1
+end
+
+MakeSectionHeader(buyScroll, "GEAR", 100)
+MakeToggle(buyScroll, "Auto Buy Gear", "AutoBuyGear", 101)
+MakeComingSoon(buyScroll, "Gear Selection").LayoutOrder = 102
+
+-- SHOP > Sell
+local sellScroll = shopSubs["SellScroll"]
+
+MakeSectionHeader(sellScroll, "AUTO SELL", 1)
+MakeToggle(sellScroll, "Auto Sell All", "AutoSell", 2)
+MakeSlider(sellScroll, "Sell Interval", "SellInterval", 5, 300, 3, "s")
+local sellNowBtn = MakeButton(sellScroll, "Sell Now", UDim2.new(1,-16,0,34), nil, Theme.Section, nil, function()
+    pcall(function() Networking.NPCS.SellAll:Fire() end)
+end)
+sellNowBtn.LayoutOrder = 4
+
+MakeSectionHeader(sellScroll, "AUTO FAVORITE", 10)
+MakeComingSoon(sellScroll, "Auto Favorite").LayoutOrder = 11
+
+-- ============================================================
+-- PAGE: FRUIT SHOVEL
+-- ============================================================
+local ShovelPage = CreatePage("Fruit Shovel")
+local shovelScroll = MakeScrollList(ShovelPage)
+
+MakeSectionHeader(shovelScroll, "FRUIT SHOVEL", 1)
+MakeToggle(shovelScroll, "Auto Shovel", "AutoShovel", 2)
+MakeSlider(shovelScroll, "Shovel Below", "ShovelBelowKg", 0, 50, 3, "kg")
+
+-- Plants dropdown
+do
+    local row = MakeFrame(shovelScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 4
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Plants (Trees)", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    MakeLabel(row, "All Plants", UDim2.new(0.4,0,1,0), UDim2.new(0.6,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+end
+
+local rfBtn = MakeButton(shovelScroll, "Refresh Plants", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, nil)
+rfBtn.LayoutOrder = 5
+
+-- Keep Mutations
+MakeSectionHeader(shovelScroll, "KEEP MUTATIONS", 6)
+local keepMuts = {"Gold","Rainbow","Electric","Frozen","Bloodlit","Chained","Starstruck"}
+local keepOrder = 7
+for _, mName in ipairs(keepMuts) do
+    local row = MakeFrame(shovelScroll, UDim2.new(1,-16,0,32), nil, Theme.Element)
+    row.LayoutOrder = keepOrder
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,5)
+    MakeLabel(row, mName, UDim2.new(1,-40,1,0), UDim2.new(0,10,0,0), nil, 11)
+    local checked = false
+    local cb = MakeFrame(row, UDim2.new(0,22,0,22), UDim2.new(1,-32,0.5,-11), Color3.fromRGB(35,35,45))
+    Instance.new("UICorner", cb).CornerRadius = UDim.new(0,4)
+    local ckMark = MakeLabel(cb, "", UDim2.new(1,0,1,0), nil, Theme.Accent, 14, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+    local cbBtn = Instance.new("TextButton"); cbBtn.Size = UDim2.new(1,0,1,0); cbBtn.BackgroundTransparency=1; cbBtn.Text=""; cbBtn.Parent=cb
+    cbBtn.MouseButton1Click:Connect(function()
+        checked = not checked
+        ckMark.Text = checked and "✓" or ""
+        cb.BackgroundColor3 = checked and Color3.fromRGB(30,40,60) or Color3.fromRGB(35,35,45)
+        if checked then table.insert(State.ShovelKeepMuts, mName)
+        else local i=table.find(State.ShovelKeepMuts,mName); if i then table.remove(State.ShovelKeepMuts,i) end end
+    end)
+    keepOrder = keepOrder + 1
+end
+
+-- ============================================================
+-- PAGE: PETS
+-- ============================================================
+local PetsPage = CreatePage("Pets")
+local _, petSubs, showPetSub = CreateTabBar(PetsPage, {"Snipe", "Hatch"})
+
+local snipeScroll = petSubs["SnipeScroll"]
+MakeSectionHeader(snipeScroll, "AUTO SNIPE PETS", 1)
+MakeToggle(snipeScroll, "Auto Snipe Pets", "AutoSnipe", 2)
+
+do
+    local row = MakeFrame(snipeScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 3
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Pets", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    MakeLabel(row, "...", UDim2.new(0.4,0,1,0), UDim2.new(0.6,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+end
+do
+    local row = MakeFrame(snipeScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 4
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Snipe Mutations", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    MakeLabel(row, "...", UDim2.new(0.4,0,1,0), UDim2.new(0.6,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+end
+MakeToggle(snipeScroll, "Server Hop if No Pet", "SnipeServerHop", 5)
+MakeButton(snipeScroll, "Save Selected Config", UDim2.new(1,-16,0,34), nil, Theme.Section, nil, nil).LayoutOrder = 6
+
+local hatchScroll = petSubs["HatchScroll"]
+MakeComingSoon(hatchScroll, "Auto Hatch Eggs").LayoutOrder = 1
+
+-- ============================================================
+-- PAGE: VISUAL
+-- ============================================================
+local VisualPage = CreatePage("Visual")
+local _, visualSubs, showVisualSub = CreateTabBar(VisualPage, {"ESP"})
+
+local espScroll = visualSubs["ESPScroll"]
+MakeSectionHeader(espScroll, "FRUIT ESP", 1)
+MakeToggle(espScroll, "Fruit ESP", "FruitESP", 2, function(v) task.spawn(UpdateESP) end)
+MakeToggle(espScroll, "Highlight Fruits", "HighlightFruits", 3, function() task.spawn(UpdateESP) end)
+
+do
+    local row = MakeFrame(espScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 4
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Plots", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    local pLbl = MakeLabel(row, "All", UDim2.new(0.4,0,1,0), UDim2.new(0.6,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+    local pb = Instance.new("TextButton"); pb.Size=UDim2.new(0.4,0,1,0); pb.Position=UDim2.new(0.6,0,0,0); pb.BackgroundTransparency=1; pb.Text=""; pb.Parent=row
+    pb.MouseButton1Click:Connect(function()
+        State.ESPPlots = State.ESPPlots == "All" and "Own" or "All"
+        pLbl.Text = State.ESPPlots
+    end)
+end
+
+do
+    local row = MakeFrame(espScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 5
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Show", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    MakeLabel(row, "Value, Weight, Mutations", UDim2.new(0.45,0,1,0), UDim2.new(0.55,0,0,0), Theme.AccentDim, 10, nil, Enum.TextXAlignment.Right)
+end
+
+MakeSlider(espScroll, "Text Height", "ESPTextHeight", 1, 10, 6, " studs", function() task.spawn(UpdateESP) end)
+
+MakeSectionHeader(espScroll, "PERFORMANCE", 10)
+MakeToggle(espScroll, "Destroy Plants (keep fruits)", "DestroyPlants", 11)
+MakeToggle(espScroll, "Remove Textures & VFX", "RemoveTextures", 12, function(v)
+    if v then
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("Texture") or d:IsA("Decal") then
+                d.Transparency = 1
+            end
+        end
+    end
+end)
+
+-- ============================================================
+-- PAGE: WEBHOOK
+-- ============================================================
+local WebhookPage = CreatePage("Webhook")
+local whScroll = MakeScrollList(WebhookPage)
+MakeComingSoon(whScroll, "Discord Webhook").LayoutOrder = 1
+
+-- ============================================================
+-- PAGE: MISC
+-- ============================================================
+local MiscPage = CreatePage("Misc")
+local _, miscSubs, showMiscSub = CreateTabBar(MiscPage, {"General", "Theming"})
+
+local generalScroll = miscSubs["GeneralScroll"]
+
+MakeSectionHeader(generalScroll, "GENERAL", 1)
+MakeToggle(generalScroll, "Anti AFK", "AntiAFK", 2, function(v) SetAntiAFK(v) end)
+MakeToggle(generalScroll, "Garden Recovery", "GardenRecovery", 3)
+MakeSlider(generalScroll, "Recovery Check", "RecoveryCheck", 5, 60, 4, "s")
+MakeToggle(generalScroll, "Anti Fling", "AntiFling", 5, function(v) SetAntiFling(v) end)
+MakeToggle(generalScroll, "Anti Shovel", "AntiShovel", 6, function(v) SetAntiShovel(v) end)
+MakeToggle(generalScroll, "Auto Spend Skill Points", "AutoSpendSkill", 7)
+
+MakeSectionHeader(generalScroll, "SERVER", 10)
+MakeButton(generalScroll, "Copy Job ID", UDim2.new(1,-16,0,34), nil, Theme.Section, nil, function()
+    setclipboard(game.JobId)
+end).LayoutOrder = 11
+
+do
+    local row = MakeFrame(generalScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 12
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    local jobBox = Instance.new("TextBox")
+    jobBox.Size = UDim2.new(1,-10,0.7,0)
+    jobBox.Position = UDim2.new(0,5,0.15,0)
+    jobBox.BackgroundTransparency = 1
+    jobBox.Text = ""
+    jobBox.PlaceholderText = "paste a job id..."
+    jobBox.TextColor3 = Theme.Text
+    jobBox.PlaceholderColor3 = Theme.TextDim
+    jobBox.TextSize = 11
+    jobBox.Font = Enum.Font.Gotham
+    jobBox.TextXAlignment = Enum.TextXAlignment.Left
+    jobBox.Parent = row
+
+    MakeButton(generalScroll, "Join Job ID", UDim2.new(1,-16,0,34), nil, Theme.Section, nil, function()
+        if jobBox.Text ~= "" then
+            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, jobBox.Text, LocalPlayer)
+        end
+    end).LayoutOrder = 13
+end
+
+MakeSectionHeader(generalScroll, "REWARDS", 20)
+MakeToggle(generalScroll, "Auto Spend Skill Points", "AutoSpendSkill", 21)
+
+-- Misc Theming
+local themingScroll = miscSubs["ThemingScroll"]
+MakeSectionHeader(themingScroll, "THEMING", 1)
+
+local themeItems = {
+    {"Accent", "Accent"},
+    {"Text", "Text"},
+    {"Background", "Bg"},
+    {"Element", "Element"},
+    {"Section", "Section"},
+}
+
+local themeOrder = 2
+for _, item in ipairs(themeItems) do
+    local row = MakeFrame(themingScroll, UDim2.new(1,-16,0,36), nil, Theme.Element)
+    row.LayoutOrder = themeOrder
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, item[1], UDim2.new(0.6,0,1,0), UDim2.new(0,10,0,0), nil, 12)
+    local colorBox = MakeFrame(row, UDim2.new(0,28,0,28), UDim2.new(1,-38,0.5,-14), Theme[item[2]])
+    Instance.new("UICorner", colorBox).CornerRadius = UDim.new(0,4)
+    local stroke = Instance.new("UIStroke", colorBox)
+    stroke.Color = Theme.Border
+    themeOrder = themeOrder + 1
+end
+
+-- ============================================================
+-- PAGE: SETTINGS
+-- ============================================================
+local SettingsPage = CreatePage("Settings")
+local _, settingsSubs, showSettingsSub = CreateTabBar(SettingsPage, {"General", "Theming"})
+
+local setGenScroll = settingsSubs["GeneralScroll"]
+MakeSectionHeader(setGenScroll, "CONFIGS", 1)
+
+local cfgNames = {}
+local cfgLbl
+local cfgNameBox
+
+-- Config dropdown
+do
+    local row = MakeFrame(setGenScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 2
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Configs", UDim2.new(0.5,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    cfgLbl = MakeLabel(row, "...", UDim2.new(0.4,0,1,0), UDim2.new(0.6,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+end
+
+do
+    local row = MakeFrame(setGenScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 3
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "Config Name", UDim2.new(0.35,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    cfgNameBox = Instance.new("TextBox")
+    cfgNameBox.Size = UDim2.new(0.55,0,0.6,0)
+    cfgNameBox.Position = UDim2.new(0.4,0,0.2,0)
+    cfgNameBox.BackgroundColor3 = Theme.Section
+    cfgNameBox.BorderSizePixel = 0
+    cfgNameBox.Text = ""
+    cfgNameBox.PlaceholderText = "..."
+    cfgNameBox.TextColor3 = Theme.Text
+    cfgNameBox.PlaceholderColor3 = Theme.TextDim
+    cfgNameBox.TextSize = 11
+    cfgNameBox.Font = Enum.Font.Gotham
+    cfgNameBox.Parent = row
+    Instance.new("UICorner", cfgNameBox).CornerRadius = UDim.new(0,4)
+end
+
+MakeButton(setGenScroll, "Create", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+    if cfgNameBox and cfgNameBox.Text ~= "" then
+        table.insert(cfgNames, cfgNameBox.Text)
+        if cfgLbl then cfgLbl.Text = cfgNameBox.Text end
+    end
+end).LayoutOrder = 4
+MakeButton(setGenScroll, "Save", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, function()
+    -- Save state to clipboard as JSON equivalent
+    pcall(function()
+        setclipboard(HttpService:JSONEncode(State))
+    end)
+end).LayoutOrder = 5
+MakeButton(setGenScroll, "Load", UDim2.new(1,-16,0,32), nil, Theme.Section, nil, nil).LayoutOrder = 6
+MakeButton(setGenScroll, "Delete", UDim2.new(1,-16,0,32), nil, Theme.Danger, nil, nil).LayoutOrder = 7
+MakeToggle(setGenScroll, "Auto Load Selected", "AutoExpand", 8) -- placeholder
+
+MakeSectionHeader(setGenScroll, "SETTINGS", 10)
+MakeButton(setGenScroll, "Unload Script", UDim2.new(1,-16,0,34), nil, Theme.Danger, Color3.fromRGB(255,100,100), function()
+    -- Stop all loops
+    ScreenGui:Destroy()
+end).LayoutOrder = 11
+
+do
+    local row = MakeFrame(setGenScroll, UDim2.new(1,-16,0,38), nil, Theme.Element)
+    row.LayoutOrder = 12
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
+    MakeLabel(row, "UI Bind", UDim2.new(0.6,0,1,0), UDim2.new(0,10,0,0), nil, 11)
+    MakeLabel(row, "RightShift", UDim2.new(0.35,0,1,0), UDim2.new(0.65,0,0,0), Theme.AccentDim, 11, nil, Enum.TextXAlignment.Right)
+end
+
+-- ============================================================
+-- DRAGGING
+-- ============================================================
+local dragging, dragStart, startPos = false, nil, nil
+TitleBar.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = i.Position
+        startPos = MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+        local d = i.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+end)
+
+-- Minimize
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    for _, child in ipairs(MainFrame:GetChildren()) do
+        if child ~= TitleBar and child.Name ~= "UICorner" and child.Name ~= "UIStroke" then
+            child.Visible = not minimized
+        end
+    end
+    MainFrame.Size = minimized and UDim2.new(0,780,0,46) or UDim2.new(0,780,0,540)
+end)
+
+-- UI Bind (RightShift to toggle)
+UserInputService.InputBegan:Connect(function(i, gp)
+    if not gp and i.KeyCode == Enum.KeyCode.RightShift then
+        MainFrame.Visible = not MainFrame.Visible
+    end
+end)
+
+-- ============================================================
+-- SHOW DEFAULT PAGE
+-- ============================================================
+ShowPage("Farm")
+
+-- ============================================================
+-- STATUS BAR UPDATER
+-- ============================================================
+task.spawn(function()
+    local weatherNames = {"Rain","Lightning","Rainbow","Snowfall","Starfall"}
+    while ScreenGui.Parent do
+        -- Weather status
+        local active = {}
+        for _, wn in ipairs(weatherNames) do
+            if IsWeather(wn) then table.insert(active, wn) end
+        end
+        local aw = workspace:GetAttribute("ActiveWeather") or workspace:GetAttribute("ActivePhase") or ""
+        if aw ~= "" then table.insert(active, 1, aw) end
+        WeatherLbl.Text = #active > 0 and ("⛅ "..table.concat(active, " · ")) or "Weather: None"
+        if IsNight() then WeatherLbl.Text = "🌙 Night | "..WeatherLbl.Text end
+
+        -- Restock countdown
+        local seedShop = StockValues:FindFirstChild("SeedShop")
+        if seedShop then
+            local nextRestock = seedShop:FindFirstChild("UnixNextRestock")
+            if nextRestock then
+                local remaining = math.max(0, nextRestock.Value - DateTime.now().UnixTimestamp)
+                if restockLbl then
+                    restockLbl.Text = "Seed Shop - next restock "..FormatTime(remaining)
+                end
+            end
+        end
+
+        -- Update weather predictor if on weather page
+        if CurrentPage == "Farm" then
+            UpdateWeatherPredictor()
+        end
+
+        task.wait(1)
+    end
+end)
+
+-- ============================================================
+-- SEED PACK WATCHER
+-- ============================================================
+SeedPackSpawnServerLocations.ChildAdded:Connect(function(child)
+    if not (State.AutoGoldSeed or State.AutoRainbowSeed) then return end
+    local isGold = child:GetAttribute("GoldSeed") == true
+    local isRainbow = child:GetAttribute("RainbowSeed") == true
+    if (isGold and State.AutoGoldSeed) or (isRainbow and State.AutoRainbowSeed) then
+        task.spawn(function()
+            task.wait(0.2) -- let it fully spawn
+            local hrp = GetHRP()
+            if not hrp then return end
+            -- Teleport to it
+            TPTo(child.Position)
+            task.wait(0.2)
+            local packId = child:GetAttribute("PackId") or child.Name
+            pcall(function() Networking.SeedPack.ClickPack:Fire(packId) end)
+        end)
+    end
+end)
+
+-- ============================================================
+-- ANTI AFK KEEP-ALIVE
+-- ============================================================
+task.spawn(function()
+    while ScreenGui.Parent do
+        if State.AntiAFK then
+            pcall(function()
+                local VirtualUser = game:GetService("VirtualUser")
+                VirtualUser:Button1Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+                task.wait(0.1)
+                VirtualUser:Button1Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            end)
+        end
+        task.wait(60)
+    end
+end)
+
+-- ============================================================
+-- CHARACTER RESPAWN HANDLER
+-- ============================================================
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    SetAntiAFK(State.AntiAFK)
+    SetAntiFling(State.AntiFling)
+end)
+
+-- ============================================================
+-- START MAIN LOOP
+-- ============================================================
+print("[Diem] Script loaded. UI visible — press RightShift to toggle.")
+task.spawn(MainLoop)
